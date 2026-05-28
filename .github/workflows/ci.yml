@@ -45,7 +45,9 @@ jobs:
         with:
           version: latest
           working-directory: api
-          args: --timeout=5m
+          # Build tags so the integration- and e2e-tagged test files are linted
+          # too (they are excluded from the default, untagged build).
+          args: --timeout=5m --build-tags=integration,e2e
 
   go-arch-lint:
     name: Go · arch drift (go-arch-lint)
@@ -63,9 +65,41 @@ jobs:
         working-directory: api
         run: go-arch-lint check --project-path .
 
+  # Unit tier: pure, no I/O — needs no database. The integration- and e2e-tagged
+  # tests run in go-test-tagged below. This job also enforces the core coverage
+  # gate (rank/intent/config >= 90%).
   go-test:
-    name: Go · test
+    name: Go · unit test (+ core coverage gate)
     runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+          cache-dependency-path: api/go.mod
+      - name: Test (unit)
+        working-directory: api
+        run: go test -race -coverprofile=coverage.out -covermode=atomic ./...
+      - name: Coverage gate (core packages >= 90%)
+        run: ./scripts/ci/coverage-gate.sh
+      - name: Upload coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: go-coverage
+          path: api/coverage.out
+          retention-days: 7
+
+  # Integration + e2e tiers: build-tagged, run against a real Postgres with the
+  # migrations applied. Each tag selects its own files; both also re-run the
+  # untagged unit tests in the DB-backed env (cheap, and a useful cross-check).
+  go-test-tagged:
+    name: Go · ${{ matrix.tier }} test
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        tier: [integration, e2e]
     services:
       postgres:
         image: postgres:15
@@ -97,15 +131,9 @@ jobs:
             echo "Applying $f"
             PGPASSWORD=postgres psql -h localhost -U postgres -d lemon_test -v ON_ERROR_STOP=1 -f "$f"
           done
-      - name: Test
+      - name: Test (${{ matrix.tier }})
         working-directory: api
-        run: go test -race -coverprofile=coverage.out -covermode=atomic ./...
-      - name: Upload coverage
-        uses: actions/upload-artifact@v4
-        with:
-          name: go-coverage
-          path: api/coverage.out
-          retention-days: 7
+        run: go test -race -tags=${{ matrix.tier }} ./...
 
   go-build:
     name: Go · build

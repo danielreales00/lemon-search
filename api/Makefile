@@ -1,4 +1,4 @@
-.PHONY: help fmt lint test build build-api build-ingest tidy install-tools
+.PHONY: help fmt lint test test-integration test-e2e cover-gate build build-api build-ingest tidy install-tools
 
 GO ?= go
 GOFUMPT ?= gofumpt
@@ -13,8 +13,17 @@ fmt: ## Format code with gofumpt
 lint: ## Run golangci-lint
 	$(GOLANGCI_LINT) run ./...
 
-test: ## Run unit tests with coverage
+test: ## Run unit tests with coverage (pure, no DB)
 	$(GO) test -race -coverprofile=coverage.out ./...
+
+test-integration: ## Run integration tests (needs a live DB: make db-up && make db-reset)
+	$(GO) test -race -tags=integration ./...
+
+test-e2e: ## Run e2e tests (needs a live DB: make db-up && make db-reset)
+	$(GO) test -race -tags=e2e ./...
+
+cover-gate: ## Enforce >=90% statement coverage on core pkgs (rank/intent/config)
+	../scripts/ci/coverage-gate.sh
 
 build: build-api build-ingest ## Build both binaries
 
