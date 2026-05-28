@@ -42,3 +42,193 @@ body {
   color: var(--muted);
   margin: 0 0 32px;
 }
+
+/* Search bar */
+.search-bar {
+  margin-bottom: 24px;
+}
+
+.search-input {
+  width: 100%;
+  padding: 12px 16px;
+  font-size: 16px;
+  font-family: var(--font-sans);
+  border: 1.5px solid var(--line);
+  border-radius: var(--radius);
+  background: #fff;
+  color: var(--ink);
+  outline: none;
+  box-shadow: var(--shadow);
+  transition: border-color 0.15s;
+}
+
+.search-input:focus {
+  border-color: var(--lemon-dark);
+}
+
+/* Search state messages */
+.search-prompt,
+.search-loading,
+.search-empty,
+.search-timing {
+  color: var(--muted);
+  font-size: 14px;
+  margin: 0 0 12px;
+}
+
+.search-error {
+  color: #c0392b;
+  font-size: 14px;
+  margin: 0 0 12px;
+}
+
+/* Results list */
+.results-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  animation: fade-in 0.15s ease;
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.result-item {
+  display: flex;
+  gap: 12px;
+  padding: 14px 16px;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+
+.result-photo {
+  width: 64px;
+  height: 64px;
+  object-fit: cover;
+  border-radius: 8px;
+  flex-shrink: 0;
+}
+
+.result-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.result-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.result-name {
+  font-weight: 600;
+  font-size: 15px;
+  flex: 1;
+}
+
+.result-chips {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.result-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.result-category {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.result-neighborhood {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.result-neighborhood::before {
+  content: '·';
+  margin-right: 6px;
+}
+
+.result-stats {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 13px;
+}
+
+.result-rating {
+  font-weight: 600;
+}
+
+.result-reviews {
+  color: var(--muted);
+}
+
+.result-price {
+  color: var(--muted);
+}
+
+.result-price::before {
+  content: '·';
+  margin-right: 4px;
+}
+
+/* Chips */
+.chip {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.chip--open {
+  background: #e6f9ee;
+  color: #1a7a3f;
+}
+
+.chip--closed {
+  background: #fde8e8;
+  color: #b91c1c;
+}
+
+.chip--neutral {
+  background: var(--line);
+  color: var(--muted);
+}
+
+.chip--new {
+  background: var(--lemon);
+  color: var(--ink);
+}
+
+.chip--claimed {
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+.chip--distance {
+  background: var(--line);
+  color: var(--muted);
+}
