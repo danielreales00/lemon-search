@@ -1,0 +1,37 @@
+# gitleaks config — extends the default ruleset.
+# Run: gitleaks detect --source . --redact
+# Hook: pre-commit on staged diff via `gitleaks protect --staged`
+
+title = "Lemon Search secrets scan"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Repo-wide allowlist"
+paths = [
+  '''^\.env\.example$''',
+  '''^bench/queries\.json$''',
+  '''^docs/.*\.md$''',
+  '''^README\.md$''',
+  '''^web/lib/api\.ts$''',
+  '''^Lemon_4_Day Build Trial\.md$''',
+]
+regexes = [
+  # Example connection strings that ship in docs/env templates.
+  '''postgres://postgres:password@localhost''',
+  '''postgres://postgres:postgres@localhost''',
+]
+
+# Project-specific catches: high-entropy tokens that aren't in the default rules.
+[[rules]]
+id = "supabase-service-key"
+description = "Supabase service_role JWT (do not commit)"
+regex = '''eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}'''
+tags = ["jwt", "supabase"]
+
+[[rules]]
+id = "fly-api-token"
+description = "Fly.io API token"
+regex = '''fo1_[A-Za-z0-9_-]{40,}'''
+tags = ["fly"]

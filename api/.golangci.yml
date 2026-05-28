@@ -1,0 +1,298 @@
+# Strict-but-practical lint set for the Lemon Search Go service.
+# Run: `golangci-lint run ./...`  (from inside api/)
+#
+# Three layers of quality gates here:
+#   1. correctness  (errcheck, staticcheck, govet, sqlclosecheck, etc.)
+#   2. complexity   (gocyclo, gocognit, funlen, nestif, dupl, goconst)
+#   3. drift        (depguard rules enforcing hex-architecture boundaries)
+# Layer 3 is doubled by api/.go-arch-lint.yml for richer rules; depguard
+# is the cheap baseline that runs on every commit.
+
+run:
+  timeout: 5m
+  go: "1.23"
+  tests: true
+  allow-parallel-runners: true
+
+output:
+  formats:
+    - format: colored-line-number
+  sort-results: true
+
+linters:
+  disable-all: true
+  enable:
+    # --- correctness ---
+    - errcheck
+    - govet
+    - staticcheck
+    - ineffassign
+    - unused
+    - gosimple
+    - errorlint
+    - bodyclose
+    - contextcheck
+    - exhaustive
+    - copyloopvar
+    - nilerr
+    - noctx
+    - sqlclosecheck
+    - rowserrcheck
+
+    # --- security ---
+    - gosec
+
+    # --- complexity / readability ---
+    - gocyclo          # cyclomatic complexity
+    - gocognit         # cognitive complexity (often tighter than cyclomatic)
+    - funlen           # function length
+    - nestif           # deeply nested ifs
+    - cyclop           # alt cyclomatic per package
+    - nakedret         # naked returns in long funcs
+    - gochecknoinits   # no init() — explicit construction only
+    - mnd              # magic numbers
+
+    # --- duplication ---
+    - dupl             # duplicate code blocks
+    - goconst          # repeated literal strings
+
+    # --- architectural drift (cheap layer; rich rules in .go-arch-lint.yml) ---
+    - depguard
+    - forbidigo
+
+    # --- style ---
+    - gocritic
+    - gofumpt
+    - misspell
+    - revive
+    - stylecheck
+    - whitespace
+    - unconvert
+    - unparam
+    - prealloc
+    - predeclared
+    - tagliatelle
+    - importas
+
+    # --- perf-ish ---
+    - makezero
+    - wastedassign
+
+    # --- testing ---
+    - thelper
+    - tparallel
+    - testifylint
+
+linters-settings:
+  errcheck:
+    check-type-assertions: true
+    check-blank: false
+  govet:
+    enable-all: true
+    disable:
+      - fieldalignment   # noisy for hand-written structs
+      - shadow           # idiomatic err shadowing trips this
+  staticcheck:
+    checks:
+      - all
+  gocyclo:
+    min-complexity: 12
+  gocognit:
+    min-complexity: 15
+  cyclop:
+    max-complexity: 12
+    package-average: 8.0
+  funlen:
+    lines: 80
+    statements: 50
+    ignore-comments: true
+  nestif:
+    min-complexity: 5
+  nakedret:
+    max-func-lines: 30
+  dupl:
+    threshold: 120
+  goconst:
+    min-len: 3
+    min-occurrences: 4
+    ignore-tests: true
+  mnd:
+    ignored-numbers: ["0", "1", "2", "3", "10", "100", "1000"]
+    ignored-functions:
+      - 'strconv\.'
+      - 'math\.'
+      - 'time\.'
+  gocritic:
+    enabled-tags: [diagnostic, performance, style]
+    disabled-checks:
+      - hugeParam
+      - rangeValCopy
+      - paramTypeCombine
+  gosec:
+    excludes:
+      - G104        # covered by errcheck
+  tagliatelle:
+    case:
+      use-field-name: false
+      rules:
+        json: snake
+        yaml: snake
+        xml: camel
+  forbidigo:
+    # Force structured logging via observ; ban print/println; ban panic in non-cmd code.
+    forbid:
+      - p: '^fmt\.Print(ln|f)?$'
+        msg: 'use slog via internal/observ, not fmt.Print*'
+      - p: '^panic\('
+        msg: 'panic is reserved for unrecoverable startup errors; return error instead'
+  importas:
+    no-unaliased: true
+    alias:
+      - pkg: github.com/jackc/pgx/v5/pgxpool
+        alias: pgxpool
+      - pkg: github.com/jackc/pgx/v5
+        alias: pgx
+
+  # --- depguard: cheap architectural drift enforcement ---
+  # Hexagonal core: domain is pure; api is composition; adapters scoped.
+  # Richer rules in api/.go-arch-lint.yml; this is the per-commit baseline.
+  depguard:
+    rules:
+      # domain must be pure — no infra deps, no other internal packages
+      domain-pure:
+        list-mode: lax
+        files:
+          - '**/internal/domain/**/*.go'
+        deny:
+          - pkg: github.com/jackc/pgx
+            desc: domain must not import database drivers
+          - pkg: net/http
+            desc: domain must not import HTTP transport
+          - pkg: github.com/danielreales00/lemon-search/api/internal/api
+            desc: domain must not depend on api
+          - pkg: github.com/danielreales00/lemon-search/api/internal/retrieve
+            desc: domain must not depend on retrieve
+          - pkg: github.com/danielreales00/lemon-search/api/internal/rank
+            desc: domain must not depend on rank
+          - pkg: github.com/danielreales00/lemon-search/api/internal/intent
+            desc: domain must not depend on intent
+          - pkg: github.com/danielreales00/lemon-search/api/internal/config
+            desc: domain must not depend on config
+          - pkg: github.com/danielreales00/lemon-search/api/internal/observ
+            desc: domain must not depend on observ
+
+      # rank: pure scoring on domain types; no infra
+      rank-scoped:
+        list-mode: lax
+        files:
+          - '**/internal/rank/**/*.go'
+        deny:
+          - pkg: github.com/jackc/pgx
+            desc: rank must not touch the database
+          - pkg: net/http
+            desc: rank must not touch HTTP
+          - pkg: github.com/danielreales00/lemon-search/api/internal/api
+          - pkg: github.com/danielreales00/lemon-search/api/internal/retrieve
+          - pkg: github.com/danielreales00/lemon-search/api/internal/intent
+
+      # intent: pure lexicon → overlay; no infra
+      intent-scoped:
+        list-mode: lax
+        files:
+          - '**/internal/intent/**/*.go'
+        deny:
+          - pkg: github.com/jackc/pgx
+          - pkg: net/http
+          - pkg: github.com/danielreales00/lemon-search/api/internal/api
+          - pkg: github.com/danielreales00/lemon-search/api/internal/retrieve
+          - pkg: github.com/danielreales00/lemon-search/api/internal/rank
+
+      # retrieve adapters: DB only; no api/rank/intent
+      retrieve-scoped:
+        list-mode: lax
+        files:
+          - '**/internal/retrieve/**/*.go'
+        deny:
+          - pkg: github.com/danielreales00/lemon-search/api/internal/api
+          - pkg: github.com/danielreales00/lemon-search/api/internal/rank
+          - pkg: github.com/danielreales00/lemon-search/api/internal/intent
+
+      # config: YAML loader; allowed to depend on domain only
+      config-scoped:
+        list-mode: lax
+        files:
+          - '**/internal/config/**/*.go'
+        deny:
+          - pkg: github.com/danielreales00/lemon-search/api/internal/api
+          - pkg: github.com/danielreales00/lemon-search/api/internal/retrieve
+          - pkg: github.com/danielreales00/lemon-search/api/internal/rank
+          - pkg: github.com/danielreales00/lemon-search/api/internal/intent
+
+      # observ: utility leaf
+      observ-leaf:
+        list-mode: lax
+        files:
+          - '**/internal/observ/**/*.go'
+        deny:
+          - pkg: github.com/danielreales00/lemon-search/api/internal/api
+          - pkg: github.com/danielreales00/lemon-search/api/internal/retrieve
+          - pkg: github.com/danielreales00/lemon-search/api/internal/rank
+          - pkg: github.com/danielreales00/lemon-search/api/internal/intent
+          - pkg: github.com/danielreales00/lemon-search/api/internal/config
+
+  revive:
+    severity: warning
+    rules:
+      - name: blank-imports
+      - name: context-as-argument
+      - name: context-keys-type
+      - name: dot-imports
+      - name: empty-block
+      - name: error-naming
+      - name: error-return
+      - name: error-strings
+      - name: errorf
+      - name: exported
+        arguments: ["disableStutteringCheck"]
+      - name: increment-decrement
+      - name: indent-error-flow
+      - name: package-comments
+      - name: range
+      - name: receiver-naming
+      - name: redefines-builtin-id
+      - name: superfluous-else
+      - name: time-naming
+      - name: unexported-return
+      - name: unreachable-code
+      - name: unused-parameter
+      - name: var-declaration
+      - name: var-naming
+
+issues:
+  exclude-rules:
+    # Tests get to be expressive — relax complexity + duplication + style.
+    - path: _test\.go
+      linters:
+        - errcheck
+        - gosec
+        - bodyclose
+        - revive
+        - stylecheck
+        - funlen
+        - dupl
+        - gocyclo
+        - gocognit
+        - cyclop
+        - goconst
+        - mnd
+        - forbidigo
+    # cmd/* main: tolerate boilerplate + magic constants.
+    - path: cmd/.*/main\.go
+      linters:
+        - gocritic
+        - gochecknoinits
+        - mnd
+        - forbidigo
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  exclude-use-default: false

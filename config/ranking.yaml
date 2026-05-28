@@ -1,0 +1,144 @@
+# Lemon Search — ranking configuration.
+#
+# Layout:
+#   signal_formulas  : switches between spec-literal formulas and alternative
+#                      implementations. Default = spec-literal everywhere.
+#   archetypes       : per-archetype weights and behavior flags.
+#   new_business     : global handling for businesses with < N reactions.
+#   exact_name       : threshold for the hard-pin path.
+#
+# The spec contract is: 7 signals, each normalized 0..1, multiplied by an
+# archetype weight, summed for a final score. Weights here are the *only*
+# place the "big boost for claimed", "extremely high distance", "hard filter
+# open status", etc. are expressed. Tuning needs no code changes.
+#
+# Signal order (must match the Go scorer):
+signals:
+  - distance
+  - rating
+  - popularity        # log(reaction count)
+  - friends
+  - claimed
+  - photos
+  - open_status
+
+signal_formulas:
+  # 'literal'  : rating_signal = lemon_score / 10
+  # 'bayesian' : rating_signal = ((C*m + n*r) / (C + n)) / 5  with r=google_rating
+  rating: literal
+  bayesian_rating:
+    prior_strength: 20         # C
+    global_mean: 4.3           # m, over google_rating
+    source: google_rating
+
+  # 'literal' : distance_signal = max(1 - distance_km / 48.28, 0)   # 30 mi
+  # 'decay'   : distance_signal = exp(-distance_km / decay_km[archetype])
+  distance: literal
+  distance_decay_km:
+    utility_distance_dominant: 3
+    low_stakes_fast_nearby: 8
+    medium_stakes_occasion: 16
+    recurring_service: 16
+    experiential: 48
+    high_stakes_one_time: 80
+
+  # popularity_signal = log(1 + n) / log(1 + global_max)
+  popularity:
+    global_max_reviews: 10000
+
+  # photo_signal = 1.0 if photo_count >= 3 else photo_demotion_below_3
+  photos:
+    photo_demotion_below_3: 0.25
+
+  # friend_signal = min(friend_count / friends_full_credit, 1.0)
+  friends:
+    friends_full_credit: 5
+
+  # When hours are missing entirely, treat as soft-open.
+  open_status:
+    closed: 0.0
+    opens_later: 0.3
+    open_now: 1.0
+    unknown_hours_signal: 0.7
+
+# ---- Archetype weights (per-signal). Tune against bench/queries.json. ----
+# Each archetype names its weights and an `open_status` behavior:
+#   hard_filter | soft | ignore
+# (`ignore` removes the signal from the linear sum.)
+archetypes:
+  low_stakes_fast_nearby:        # restaurants, cafés, bars, fast food, ...
+    weights:
+      distance: 0.25
+      rating: 0.18
+      popularity: 0.12
+      friends: 0.12
+      claimed: 0.08
+      photos: 0.10
+      open_status: 0.15
+    open_status: hard_filter
+
+  medium_stakes_occasion:        # gyms, salons, barbers, spas, ...
+    weights:
+      distance: 0.10
+      rating: 0.20
+      popularity: 0.18
+      friends: 0.15
+      claimed: 0.15
+      photos: 0.12
+      open_status: 0.10
+    open_status: soft
+
+  high_stakes_one_time:          # weddings, contractors, photographers, ...
+    weights:
+      distance: 0.04
+      rating: 0.20
+      popularity: 0.18
+      friends: 0.16
+      claimed: 0.25            # "big boost for claimed"
+      photos: 0.15
+      open_status: 0.02
+    open_status: ignore
+
+  experiential:                   # boats, hotels, theaters, beach clubs, ...
+    weights:
+      distance: 0.08
+      rating: 0.22
+      popularity: 0.14
+      friends: 0.16
+      claimed: 0.10
+      photos: 0.25
+      open_status: 0.05
+    open_status: ignore
+
+  recurring_service:              # cleaners, dog walkers, meal prep, ...
+    weights:
+      distance: 0.08
+      rating: 0.20
+      popularity: 0.18
+      friends: 0.16
+      claimed: 0.22
+      photos: 0.10
+      open_status: 0.06
+    open_status: soft
+
+  utility_distance_dominant:      # towing, tires, glass, convenience, ...
+    weights:
+      distance: 0.45             # "distance extremely high"
+      rating: 0.10
+      popularity: 0.10
+      friends: 0.02
+      claimed: 0.08
+      photos: 0.05
+      open_status: 0.20
+    open_status: hard_filter
+
+# ---- New-business handling ----
+new_business:
+  threshold_review_count: 10
+  rating_demote_factor: 0.85     # multiply rating signal when is_new
+  pin_top: false                 # de-pin pass: keep new biz out of top-2 when close
+  swap_window: 0.05              # if a non-new biz is within this score, swap
+
+# ---- Exact-name hard pin ----
+exact_name:
+  similarity_threshold: 0.85

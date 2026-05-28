@@ -1,0 +1,50 @@
+{
+  "name": "lemon-search-web",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Lemon Search frontend — thin search bar over the Go API.",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint --max-warnings=0",
+    "lint:fix": "next lint --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "typecheck": "tsc --noEmit",
+    "knip": "knip",
+    "knip:fix": "knip --fix --allow-remove-files",
+    "madge": "madge --circular --extensions ts,tsx app components lib",
+    "madge:graph": "madge --image dep-graph.svg --extensions ts,tsx app components lib",
+    "deps:check": "knip && npm run madge",
+    "quality": "npm run lint && npm run typecheck && npm run format:check && npm run knip && npm run madge"
+  },
+  "dependencies": {
+    "next": "^15.1.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@typescript-eslint/eslint-plugin": "^8.18.0",
+    "@typescript-eslint/parser": "^8.18.0",
+    "eslint": "^8.57.1",
+    "eslint-config-next": "^15.1.0",
+    "eslint-config-prettier": "^9.1.0",
+    "eslint-import-resolver-typescript": "^3.7.0",
+    "eslint-plugin-boundaries": "^5.0.1",
+    "eslint-plugin-import": "^2.31.0",
+    "eslint-plugin-sonarjs": "^1.0.4",
+    "eslint-plugin-unicorn": "^55.0.0",
+    "eslint-plugin-unused-imports": "^4.1.4",
+    "knip": "^5.39.0",
+    "madge": "^8.0.0",
+    "prettier": "^3.4.2",
+    "typescript": "^5.7.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

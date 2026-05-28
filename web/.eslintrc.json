@@ -1,0 +1,133 @@
+{
+  "root": true,
+  "parser": "@typescript-eslint/parser",
+  "parserOptions": {
+    "project": "./tsconfig.json",
+    "tsconfigRootDir": "."
+  },
+  "plugins": [
+    "@typescript-eslint",
+    "import",
+    "boundaries",
+    "sonarjs",
+    "unicorn",
+    "unused-imports"
+  ],
+  "extends": [
+    "next/core-web-vitals",
+    "plugin:@typescript-eslint/strict-type-checked",
+    "plugin:@typescript-eslint/stylistic-type-checked",
+    "plugin:import/recommended",
+    "plugin:import/typescript",
+    "plugin:sonarjs/recommended",
+    "plugin:unicorn/recommended",
+    "prettier"
+  ],
+  "settings": {
+    "import/resolver": {
+      "typescript": { "alwaysTryTypes": true, "project": "./tsconfig.json" }
+    },
+    "boundaries/include": ["app/**/*", "components/**/*", "lib/**/*"],
+    "boundaries/elements": [
+      { "type": "app", "pattern": "app/**/*" },
+      { "type": "component", "pattern": "components/**/*" },
+      { "type": "lib", "pattern": "lib/**/*" }
+    ]
+  },
+  "rules": {
+    "@typescript-eslint/consistent-type-imports": ["error", { "prefer": "type-imports" }],
+    "@typescript-eslint/no-unused-vars": "off",
+    "@typescript-eslint/no-explicit-any": "error",
+    "@typescript-eslint/explicit-function-return-type": [
+      "warn",
+      { "allowExpressions": true, "allowTypedFunctionExpressions": true }
+    ],
+    "@typescript-eslint/no-misused-promises": [
+      "error",
+      { "checksVoidReturn": { "attributes": false } }
+    ],
+    "@typescript-eslint/no-floating-promises": "error",
+    "@typescript-eslint/restrict-template-expressions": [
+      "error",
+      { "allowNumber": true, "allowBoolean": true }
+    ],
+
+    "unused-imports/no-unused-imports": "error",
+    "unused-imports/no-unused-vars": [
+      "error",
+      {
+        "vars": "all",
+        "args": "after-used",
+        "argsIgnorePattern": "^_",
+        "varsIgnorePattern": "^_"
+      }
+    ],
+
+    "import/order": [
+      "error",
+      {
+        "groups": ["builtin", "external", "internal", "parent", "sibling", "index", "type"],
+        "newlines-between": "always",
+        "alphabetize": { "order": "asc", "caseInsensitive": true }
+      }
+    ],
+    "import/no-default-export": "off",
+    "import/no-unresolved": "off",
+    "import/no-cycle": ["error", { "maxDepth": 10 }],
+
+    "boundaries/element-types": [
+      "error",
+      {
+        "default": "disallow",
+        "rules": [
+          { "from": "app", "allow": ["app", "component", "lib"] },
+          { "from": "component", "allow": ["component", "lib"] },
+          { "from": "lib", "allow": ["lib"] }
+        ]
+      }
+    ],
+    "boundaries/no-private": "error",
+
+    "sonarjs/cognitive-complexity": ["error", 15],
+    "sonarjs/no-duplicate-string": ["error", { "threshold": 4 }],
+    "sonarjs/no-identical-functions": "error",
+    "sonarjs/no-nested-template-literals": "warn",
+    "sonarjs/no-redundant-jump": "error",
+    "sonarjs/prefer-immediate-return": "error",
+    "sonarjs/prefer-single-boolean-return": "error",
+
+    "unicorn/filename-case": ["error", { "cases": { "kebabCase": true, "pascalCase": true } }],
+    "unicorn/no-null": "off",
+    "unicorn/prevent-abbreviations": "off",
+    "unicorn/no-array-reduce": "off",
+    "unicorn/prefer-module": "off",
+    "unicorn/no-useless-undefined": "off",
+
+    "no-console": ["warn", { "allow": ["warn", "error"] }],
+    "eqeqeq": ["error", "always"],
+    "curly": ["error", "all"],
+    "complexity": ["error", { "max": 12 }],
+    "max-lines-per-function": [
+      "warn",
+      { "max": 80, "skipBlankLines": true, "skipComments": true }
+    ],
+    "max-depth": ["error", 4]
+  },
+  "overrides": [
+    {
+      "files": ["*.config.{ts,js,mjs}", "next.config.ts"],
+      "rules": {
+        "import/no-default-export": "off",
+        "@typescript-eslint/explicit-function-return-type": "off",
+        "unicorn/filename-case": "off"
+      }
+    },
+    {
+      "files": ["app/**/{page,layout,template,loading,error,not-found,route}.tsx", "app/**/{page,layout,template,loading,error,not-found,route}.ts"],
+      "rules": {
+        "import/no-default-export": "off"
+      }
+    }
+  ],
+  "ignorePatterns": [".next/", "out/", "node_modules/", "next-env.d.ts"]
+}

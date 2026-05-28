@@ -1,0 +1,15 @@
+# Minimal supabase CLI config. Generated values get filled by `supabase init`
+# locally if you want a full toml; this file is enough for migrations.
+
+project_id = "lemon-search"
+
+[db]
+port = 54322
+shadow_port = 54320
+major_version = 15
+
+[db.pooler]
+enabled = false
+
+[studio]
+enabled = false

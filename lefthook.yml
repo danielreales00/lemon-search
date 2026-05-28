@@ -1,0 +1,154 @@
+# Pre-commit / pre-push / commit-msg hooks for Lemon Search.
+#
+# Install: brew install lefthook        (or: npm i -g lefthook)
+# Enable:  lefthook install
+#
+# Layers (each STRICT — failures block):
+#   commit-msg  → commitlint (conventional commits)
+#   pre-commit  → fast, changed-files-only checks (keystroke budget)
+#   pre-push    → full lint + tests + build + drift + dead-code (push budget)
+#
+# Quality gates wired here:
+#   - correctness:  gofumpt, golangci-lint, eslint, tsc
+#   - complexity:   gocyclo + gocognit + funlen + sonarjs (via lint configs)
+#   - dead code:    unused (Go) + knip (TS)
+#   - drift:        depguard (Go), go-arch-lint (Go), eslint-plugin-boundaries (TS)
+#   - cycles:       import/no-cycle (TS), madge --circular (TS)
+#   - secrets:      gitleaks (staged diff on commit; history on push)
+#   - convention:   commitlint on commit-msg
+
+skip_output:
+  - meta
+  - success
+output:
+  - failure
+  - summary
+
+# ---------------------------------------------------------------- commit-msg
+commit-msg:
+  commands:
+    commitlint:
+      run: npx --no-install -- commitlint --edit {1}
+
+# ---------------------------------------------------------------- pre-commit
+pre-commit:
+  parallel: true
+  commands:
+    # --- Go formatting (changed .go files only) ---
+    gofumpt:
+      tags: go
+      glob: "api/**/*.go"
+      run: |
+        cd api && gofumpt -l -d {staged_files} >&2
+        test -z "$(cd api && gofumpt -l {staged_files})"
+      stage_fixed: true
+
+    # --- Go lint (only new issues vs HEAD~1) — fast path ---
+    golangci-lint-fast:
+      tags: go
+      glob: "api/**/*.go"
+      run: cd api && golangci-lint run --fast --new-from-rev=HEAD~1 ./...
+
+    # --- Go architecture drift (project-level, but fast) ---
+    go-arch-lint:
+      tags: [go, drift]
+      glob: "api/**/*.go"
+      run: cd api && go-arch-lint check --project-path .
+
+    # --- TS lint+fix on changed web files ---
+    eslint:
+      tags: web
+      glob: "web/**/*.{ts,tsx,js,jsx,mjs}"
+      run: cd web && npx eslint --max-warnings=0 --fix {staged_files}
+      stage_fixed: true
+
+    # --- Prettier on TS/JSON/YAML/MD/CSS in web/ ---
+    prettier:
+      tags: web
+      glob: "web/**/*.{ts,tsx,js,jsx,mjs,json,yaml,yml,md,css}"
+      run: cd web && npx prettier --write {staged_files}
+      stage_fixed: true
+
+    # --- TS circular-dep scan (project-level, fast) ---
+    madge-circular:
+      tags: [web, drift]
+      glob: "web/**/*.{ts,tsx}"
+      run: cd web && npx madge --circular --extensions ts,tsx app components lib
+
+    # --- Markdown lint on changed .md ---
+    markdownlint:
+      tags: docs
+      glob: "**/*.md"
+      run: npx --no-install -- markdownlint-cli2 {staged_files}
+
+    # --- Secrets scan on staged diff ---
+    gitleaks:
+      tags: security
+      run: gitleaks protect --staged --redact --config .gitleaks.toml
+
+    # --- Block large files (> 5 MB) ---
+    block-big-files:
+      run: |
+        big=$(git diff --cached --name-only --diff-filter=AM | xargs -I{} ls -l {} 2>/dev/null | awk '$5 > 5242880 {print $NF}')
+        if [ -n "$big" ]; then echo "Refusing to commit > 5MB files:"; echo "$big"; exit 1; fi
+
+    # --- Block .env files (defense in depth) ---
+    block-env-files:
+      run: |
+        if git diff --cached --name-only | grep -E '^\.env($|\.[^.]+$)' | grep -v '\.example$'; then
+          echo "Refusing to commit .env files"; exit 1;
+        fi
+
+# ---------------------------------------------------------------- pre-push
+pre-push:
+  parallel: true
+  commands:
+    # --- Full Go lint (correctness + complexity + drift baseline) ---
+    go-lint-full:
+      tags: go
+      glob: "api/**/*.go"
+      run: cd api && golangci-lint run ./...
+
+    # --- Full Go architecture drift ---
+    go-arch-lint-full:
+      tags: [go, drift]
+      glob: "api/**/*.go"
+      run: cd api && go-arch-lint check --project-path .
+
+    # --- Go duplicate-code report (informational alongside golangci-lint dupl) ---
+    # dupl is already part of golangci-lint enabled set; nothing extra here.
+
+    # --- Full Go tests with race detector ---
+    go-test:
+      tags: go
+      glob: "api/**/*.go"
+      run: cd api && go test -race -timeout=2m ./...
+
+    # --- Go build sanity ---
+    go-build:
+      tags: go
+      glob: "api/**/*.go"
+      run: cd api && go build ./...
+
+    # --- TS typecheck ---
+    web-typecheck:
+      tags: web
+      glob: "web/**/*.{ts,tsx}"
+      run: cd web && npx tsc --noEmit
+
+    # --- TS full lint (correctness + complexity + drift) ---
+    web-lint-full:
+      tags: web
+      glob: "web/**/*.{ts,tsx,js,jsx,mjs}"
+      run: cd web && npx eslint --max-warnings=0 .
+
+    # --- TS dead-code / unused-exports / unused-deps ---
+    web-knip:
+      tags: [web, deadcode]
+      glob: "web/**/*.{ts,tsx,json}"
+      run: cd web && npx knip --no-progress
+
+    # --- Secrets scan over full history range being pushed ---
+    gitleaks-history:
+      tags: security
+      run: gitleaks detect --redact --config .gitleaks.toml --no-banner

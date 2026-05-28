@@ -1,0 +1,42 @@
+{
+  "$schema_note": "Each test asserts that AT LEAST ONE of expected_top_3 appears in the API's top 3 results. expected_top_3 stays as placeholders until Stage 2; fill in once ingestion produces stable IDs/names.",
+  "user_location": {
+    "lat": 25.7741728,
+    "lng": -80.1937,
+    "label": "Downtown Miami"
+  },
+  "now_override": "2026-05-27T13:00:00-04:00",
+  "tests": [
+    { "kind": "typo",        "q": "joes barbr shop",        "expected_top_3": ["__FILL__"] },
+    { "kind": "typo",        "q": "steaak",                 "expected_top_3": ["__FILL__"] },
+    { "kind": "typo",        "q": "resterant",              "expected_top_3": ["__FILL__"] },
+    { "kind": "typo",        "q": "gym with poo",           "expected_top_3": ["__FILL__"] },
+    { "kind": "prefix",      "q": "best steakh",            "expected_top_3": ["__FILL__"] },
+    { "kind": "prefix",      "q": "coff",                   "expected_top_3": ["__FILL__"] },
+    { "kind": "prefix",      "q": "tac",                    "expected_top_3": ["__FILL__"] },
+    { "kind": "category",    "q": "sushi",                  "expected_top_3": ["__FILL__"] },
+    { "kind": "category",    "q": "barber",                 "expected_top_3": ["__FILL__"] },
+    { "kind": "category",    "q": "pilates",                "expected_top_3": ["__FILL__"] },
+    { "kind": "category",    "q": "nail salon",             "expected_top_3": ["__FILL__"] },
+    { "kind": "intent",      "q": "cheap restaurants",      "expected_top_3": ["__FILL__"] },
+    { "kind": "intent",      "q": "fancy dinner",           "expected_top_3": ["__FILL__"] },
+    { "kind": "intent",      "q": "i'm hungry",             "expected_top_3": ["__FILL__"] },
+    { "kind": "intent",      "q": "date night",             "expected_top_3": ["__FILL__"] },
+    { "kind": "intent",      "q": "kid friendly",           "expected_top_3": ["__FILL__"] },
+    { "kind": "intent",      "q": "outdoor seating",        "expected_top_3": ["__FILL__"] },
+    { "kind": "intent",      "q": "open now",               "expected_top_3": ["__FILL__"] },
+    { "kind": "intent",      "q": "happy hour",             "expected_top_3": ["__FILL__"] },
+    { "kind": "intent",      "q": "wedding photographer",   "expected_top_3": ["__FILL__"] },
+    { "kind": "intent",      "q": "emergency tow",          "expected_top_3": ["__FILL__"] },
+    { "kind": "exact_name",  "q": "__FILL_NAME__",          "expected_top_3": ["__FILL__"] },
+    { "kind": "exact_name",  "q": "__FILL_NAME_LOWERCASE__","expected_top_3": ["__FILL__"] },
+    { "kind": "new_biz",     "q": "__FILL_QUERY__",         "expected_top_3": ["__FILL__"], "note": "candidate with <10 reactions should appear with new badge but NOT at #1" },
+    { "kind": "geo",         "q": "coffee",                 "expected_top_3": ["__FILL__"], "user_location_override": { "lat": 25.7907, "lng": -80.1300, "label": "Miami Beach" } },
+    { "kind": "geo",         "q": "supermercado",           "expected_top_3": ["__FILL__"], "note": "Spanish/accent input" },
+    { "kind": "geo",         "q": "café",                   "expected_top_3": ["__FILL__"], "note": "non-Latin accent" },
+    { "kind": "edge",        "q": "",                       "expected_top_3": [],          "note": "empty query → empty results, no 5xx" },
+    { "kind": "edge",        "q": "x",                      "expected_top_3": [],          "note": "single char → empty or coherent prefix, no 5xx" },
+    { "kind": "edge",        "q": "    ",                   "expected_top_3": [],          "note": "whitespace only" },
+    { "kind": "edge",        "q": "!!!@@@###",              "expected_top_3": [],          "note": "punctuation only" }
+  ]
+}

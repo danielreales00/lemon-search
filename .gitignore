@@ -1,0 +1,54 @@
+# --- Data (huge files; do not commit) ---
+# Be specific to the source dumps so config/lint JSON stays tracked.
+businesses_lemon.csv
+businesses-*.json
+*.csv.gz
+*.json.gz
+
+# --- Go ---
+/api/bin/
+/api/dist/
+/api/coverage.out
+/api/coverage.html
+*.test
+*.out
+
+# --- Node / Next.js ---
+node_modules/
+.next/
+out/
+dist/
+.turbo/
+.vercel/
+.swc/
+*.tsbuildinfo
+next-env.d.ts
+
+# --- Env ---
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# --- Supabase ---
+supabase/.branches
+supabase/.temp
+supabase/.env
+
+# --- Tooling ---
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+.cursor/
+*.log
+*.pid
+*.seed
+.DS_Store
+
+# --- Bench output ---
+bench/results-*.json
+bench/results/
+
+# --- Local-only ---
+.claude/

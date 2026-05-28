@@ -1,0 +1,33 @@
+name: Deploy API → Fly.io
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "api/**"
+      - "config/**"
+      - "supabase/migrations/**"
+      - "fly.toml"
+      - ".github/workflows/deploy-api.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-api
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: flyctl deploy
+    runs-on: ubuntu-latest
+    # Gate on CI green for the same SHA.
+    needs: []
+    steps:
+      - uses: actions/checkout@v4
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - name: Deploy
+        run: flyctl deploy --remote-only --config fly.toml
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}

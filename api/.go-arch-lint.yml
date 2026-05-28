@@ -1,0 +1,109 @@
+# Architectural-drift enforcement for the Lemon Search Go service.
+# Run:   go-arch-lint check --project-path .
+# Docs:  https://github.com/fe3dback/go-arch-lint
+#
+# Hexagonal core:
+#   - domain is pure (no I/O, no other internals)
+#   - api is the composition root for HTTP transport
+#   - retrieve/* are adapters implementing domain ports
+#   - rank / intent / config / observ are scoped helpers
+#   - cmd/* are entrypoints; only they wire things up
+
+version: 3
+workdir: .
+
+allow:
+  depOnAnyVendor: true
+  deepScan: true
+
+# ------- vendor-side guardrails -------
+vendors:
+  pgx:
+    in: github.com/jackc/pgx/**
+  pgxpool:
+    in: github.com/jackc/pgx/v5/pgxpool/**
+  yaml:
+    in: gopkg.in/yaml.v3
+  testify:
+    in: github.com/stretchr/testify/**
+  net-http:
+    in: net/http
+
+# ------- internal components -------
+components:
+  domain:
+    in: internal/domain/**
+  api:
+    in: internal/api/**
+  intent:
+    in: internal/intent/**
+  rank:
+    in: internal/rank/**
+  config:
+    in: internal/config/**
+  observ:
+    in: internal/observ/**
+  retrieve-postgres:
+    in: internal/retrieve/postgres/**
+  cmd-api:
+    in: cmd/api/**
+  cmd-ingest:
+    in: cmd/ingest/**
+
+# ------- import rules -------
+deps:
+  # domain is pure
+  domain:
+    mayDependOn: []
+    cannotDependOn: [api, intent, rank, config, observ, retrieve-postgres]
+    anyVendorDeps: false   # not even vendor packages
+
+  # observ is a leaf utility (used by everyone above)
+  observ:
+    mayDependOn: []
+    cannotDependOn: [api, intent, rank, config, retrieve-postgres, domain]
+
+  # config can only see domain (loads typed config into domain shapes)
+  config:
+    mayDependOn: [domain]
+    canUse: [yaml]
+    cannotDependOn: [api, intent, rank, retrieve-postgres, observ]
+
+  # intent: lexicon → overlay; only domain types
+  intent:
+    mayDependOn: [domain]
+    cannotDependOn: [api, rank, retrieve-postgres, config]
+    anyVendorDeps: false
+
+  # rank: pure scoring; sees domain types + config
+  rank:
+    mayDependOn: [domain, config]
+    cannotDependOn: [api, retrieve-postgres, intent]
+    anyVendorDeps: false
+
+  # retrieve-postgres: DB adapter; sees domain only
+  retrieve-postgres:
+    mayDependOn: [domain]
+    canUse: [pgx, pgxpool]
+    cannotDependOn: [api, rank, intent, config]
+
+  # api: HTTP transport; composes everything except cmd
+  api:
+    mayDependOn: [domain, intent, rank, config, observ, retrieve-postgres]
+    canUse: [net-http]
+
+  # cmd-api: composition root for the server
+  cmd-api:
+    mayDependOn: [domain, api, intent, rank, config, observ, retrieve-postgres]
+    canUse: [net-http, pgx, pgxpool, yaml]
+
+  # cmd-ingest: ingestion CLI; no HTTP needed
+  cmd-ingest:
+    mayDependOn: [domain, retrieve-postgres, config, observ]
+    canUse: [pgx, pgxpool, yaml]
+
+# ------- common, repeated files exemptions -------
+commonComponents: []
+
+# ------- assertions: enforce mandatory components present -------
+exposedVendors: []
