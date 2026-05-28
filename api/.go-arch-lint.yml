@@ -54,14 +54,19 @@ components:
 # `mayDependOn` is an allowlist: anything not listed is forbidden. (There is no
 # `cannotDependOn` in go-arch-lint — the allowlist already implies it.)
 deps:
-  # domain is pure
+  # domain is pure: NO internal-component deps (mayDependOn: []). The component-
+  # imports linter enforces that. Vendor checks are global (allow.depOnAnyVendor),
+  # so anyVendorDeps:true here is a no-op that just satisfies go-arch-lint's
+  # "must allow something" rule. domain's no-vendor intent is also enforced by
+  # the `domain-pure` depguard rule in .golangci.yml.
   domain:
     mayDependOn: []
-    anyVendorDeps: false   # not even vendor packages
+    anyVendorDeps: true
 
-  # observ is a leaf utility (used by everyone above)
+  # observ is a leaf utility (used by everyone above); no internal-component deps.
   observ:
     mayDependOn: []
+    anyVendorDeps: true
 
   # config can only see domain (loads typed config into domain shapes)
   config:
