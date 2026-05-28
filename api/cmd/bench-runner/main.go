@@ -1,10 +1,17 @@
-// Command bench-runner scores a query cluster against the real retrieval +
-// ranking pipeline and prints a pass@3 / latency report. It runs in-process
-// (no HTTP server) so the same binary can later drive alternative BusinessRepo
-// adapters (Postgres matcher variants, a search engine) for an A/B comparison.
+// Command bench-runner scores a query set against the real retrieval + ranking
+// pipeline and prints a pass@3 / latency report. It runs in-process (no HTTP
+// server) so the same binary can drive alternative BusinessRepo adapters
+// (Postgres matcher variants, a search engine) for an A/B comparison.
 //
-//	cd api && LEMON_DATABASE_URL=... go run ./cmd/bench-runner \
-//	    -bench ../bench/match-cluster.json -config ../config/ranking.yaml
+// Two modes:
+//
+//   - curated:   -bench bench/match-cluster.json
+//
+//   - generated: -generate 300 -seed 42   (samples real businesses and derives
+//     exact/typo/accent/partial queries with automatic ground truth — a large,
+//     unbiased sample. Fixed seed => identical cases across adapters.)
+//
+//     cd api && LEMON_DATABASE_URL=... go run ./cmd/bench-runner -generate 300
 package main
 
 import (
@@ -12,6 +19,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"math/rand"
 	"os"
 	"sort"
 	"strings"
@@ -26,12 +34,26 @@ import (
 )
 
 const (
-	defaultDB       = "postgres://postgres:postgres@localhost:54322/postgres?sslmode=disable"
-	candidateLimit  = 150
-	resultLimit     = 15
-	topK            = 3
-	percentile95Num = 95
+	defaultDB      = "postgres://postgres:postgres@localhost:54322/postgres?sslmode=disable"
+	candidateLimit = 150
+	resultLimit    = 15
+	topK           = 3
+	pctl95         = 95
+	maxFailLines   = 30
+
+	genLat = 25.7741728
+	genLng = -80.1937
+	genNow = "2026-05-27T13:00:00-04:00"
+	minRev = 20 // sample businesses with at least this many reviews (findable)
 )
+
+// overFireWords are bare category terms that must NOT trigger an exact-name pin.
+var overFireWords = []string{
+	"coffee", "sushi", "pizza", "taco", "tacos", "barber", "gym", "spa",
+	"nails", "yoga", "ramen", "burger", "burgers", "bakery", "tattoo",
+	"massage", "steak", "seafood", "pilates", "cafe", "brunch", "donuts",
+	"smoothie", "salon", "boba",
+}
 
 type benchFile struct {
 	UserLocation struct {
@@ -59,32 +81,34 @@ type result struct {
 	err      error
 }
 
+type opts struct {
+	benchPath string
+	cfgPath   string
+	label     string
+	generate  int
+	seed      int64
+}
+
 func main() {
-	benchPath := flag.String("bench", "../bench/match-cluster.json", "path to the bench cluster JSON")
-	cfgPath := flag.String("config", "../config/ranking.yaml", "path to ranking.yaml")
-	label := flag.String("label", "baseline", "label for this run (shown in the report)")
+	var o opts
+	flag.StringVar(&o.benchPath, "bench", "../bench/match-cluster.json", "curated bench JSON (when -generate=0)")
+	flag.StringVar(&o.cfgPath, "config", "../config/ranking.yaml", "path to ranking.yaml")
+	flag.StringVar(&o.label, "label", "run", "label shown in the report")
+	flag.IntVar(&o.generate, "generate", 0, "if >0, generate this many sampled businesses' query variants")
+	flag.Int64Var(&o.seed, "seed", 42, "RNG seed for generated typos (fixed => reproducible)")
 	flag.Parse()
 
-	if err := run(*benchPath, *cfgPath, *label); err != nil {
+	if err := run(o); err != nil {
 		fmt.Fprintln(os.Stderr, "bench-runner:", err)
 		os.Exit(1)
 	}
 }
 
-func run(benchPath, cfgPath, label string) error {
-	bf, err := loadBench(benchPath)
-	if err != nil {
-		return err
-	}
-	cfg, err := config.LoadFile(cfgPath)
+func run(o opts) error {
+	cfg, err := config.LoadFile(o.cfgPath)
 	if err != nil {
 		return fmt.Errorf("loading config: %w", err)
 	}
-	now, err := time.Parse(time.RFC3339, bf.NowOverride)
-	if err != nil {
-		return fmt.Errorf("parsing now_override %q: %w", bf.NowOverride, err)
-	}
-
 	ctx := context.Background()
 	url := os.Getenv("LEMON_DATABASE_URL")
 	if url == "" {
@@ -100,16 +124,32 @@ func run(benchPath, cfgPath, label string) error {
 		return fmt.Errorf("building repo: %w", err)
 	}
 
+	bf, err := buildBench(ctx, pool, o)
+	if err != nil {
+		return err
+	}
+	now, err := time.Parse(time.RFC3339, bf.NowOverride)
+	if err != nil {
+		return fmt.Errorf("parsing now_override %q: %w", bf.NowOverride, err)
+	}
+
 	results := make([]result, 0, len(bf.Tests))
 	for i := range bf.Tests {
 		results = append(results, evalTest(ctx, repo, cfg, bf, now, bf.Tests[i]))
 	}
-	report(label, results)
+	report(o.label, len(bf.Tests), results)
 	return nil
 }
 
+func buildBench(ctx context.Context, pool *pgxpool.Pool, o opts) (benchFile, error) {
+	if o.generate > 0 {
+		return generateBench(ctx, pool, o.generate, o.seed)
+	}
+	return loadBench(o.benchPath)
+}
+
 func loadBench(path string) (benchFile, error) {
-	raw, err := os.ReadFile(path) //nolint:gosec // operator-supplied bench path, not user input
+	raw, err := os.ReadFile(path) //nolint:gosec // operator-supplied bench path
 	if err != nil {
 		return benchFile{}, fmt.Errorf("reading bench file %q: %w", path, err)
 	}
@@ -120,11 +160,112 @@ func loadBench(path string) (benchFile, error) {
 	return bf, nil
 }
 
+// generateBench samples real businesses and derives query variants with
+// automatic ground truth (the sampled business name). Fixed seed => stable set.
+func generateBench(ctx context.Context, pool *pgxpool.Pool, n int, seed int64) (benchFile, error) {
+	names, err := sampleNames(ctx, pool, n)
+	if err != nil {
+		return benchFile{}, err
+	}
+	rng := rand.New(rand.NewSource(seed)) //nolint:gosec // reproducible bench RNG, not security
+	tests := make([]test, 0, n*3)
+	for _, nm := range names {
+		tests = append(tests, test{Kind: "exact_name", Q: nm, Expected: []string{nm}})
+		if ty := injectTypos(nm, rng); ty != "" && ty != strings.ToLower(nm) {
+			tests = append(tests, test{Kind: "typo", Q: ty, Expected: []string{nm}})
+		}
+		if s := stripAccents(nm); s != nm {
+			tests = append(tests, test{Kind: "accent", Q: strings.ToLower(s), Expected: []string{nm}})
+		}
+		if toks := strings.Fields(nm); len(toks) >= 4 {
+			tests = append(tests, test{Kind: "partial", Q: strings.Join(toks[:3], " "), Expected: []string{nm}})
+		}
+	}
+	for _, w := range overFireWords {
+		tests = append(tests, test{Kind: "over_fire", Q: w})
+	}
+	bf := benchFile{NowOverride: genNow, Tests: tests}
+	bf.UserLocation.Lat = genLat
+	bf.UserLocation.Lng = genLng
+	return bf, nil
+}
+
+func sampleNames(ctx context.Context, pool *pgxpool.Pool, n int) ([]string, error) {
+	const q = `
+		select name from businesses
+		where coalesce(google_review_count, 0) >= $1 and name ~ '^[A-Za-z0-9]'
+		order by md5(id::text)
+		limit $2`
+	rows, err := pool.Query(ctx, q, minRev, n)
+	if err != nil {
+		return nil, fmt.Errorf("sampling businesses: %w", err)
+	}
+	defer rows.Close()
+	out := make([]string, 0, n)
+	for rows.Next() {
+		var nm string
+		if err := rows.Scan(&nm); err != nil {
+			return nil, fmt.Errorf("scanning sample: %w", err)
+		}
+		out = append(out, nm)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("sample rows: %w", err)
+	}
+	return out, nil
+}
+
+// injectTypos applies 1 edit to ~60% of tokens longer than 3 chars (the spec's
+// 1-4 char/word model), returning a lowercased typo'd query.
+func injectTypos(name string, rng *rand.Rand) string {
+	toks := strings.Fields(strings.ToLower(name))
+	for i, t := range toks {
+		if len([]rune(t)) <= 3 {
+			continue
+		}
+		if rng.Float64() < 0.6 { //nolint:mnd // bench heuristic
+			toks[i] = mutateToken(t, rng)
+		}
+	}
+	return strings.Join(toks, " ")
+}
+
+func mutateToken(t string, rng *rand.Rand) string {
+	r := []rune(t)
+	pos := rng.Intn(len(r))
+	switch rng.Intn(4) { //nolint:mnd // 4 edit kinds
+	case 0: // delete
+		return string(r[:pos]) + string(r[pos+1:])
+	case 1: // substitute
+		r[pos] = rune('a' + rng.Intn(26)) //nolint:mnd // 26 letters
+		return string(r)
+	case 2: // transpose with next
+		if pos < len(r)-1 {
+			r[pos], r[pos+1] = r[pos+1], r[pos]
+		}
+		return string(r)
+	default: // insert
+		return string(r[:pos]) + string(rune('a'+rng.Intn(26))) + string(r[pos:]) //nolint:mnd // 26 letters
+	}
+}
+
+var accentRepl = strings.NewReplacer(
+	"á", "a", "à", "a", "â", "a", "ä", "a", "ã", "a",
+	"é", "e", "è", "e", "ê", "e", "ë", "e",
+	"í", "i", "ì", "i", "î", "i", "ï", "i",
+	"ó", "o", "ò", "o", "ô", "o", "ö", "o", "õ", "o",
+	"ú", "u", "ù", "u", "û", "u", "ü", "u",
+	"ñ", "n", "ç", "c",
+	"Á", "A", "É", "E", "Í", "I", "Ó", "O", "Ú", "U", "Ñ", "N", "Ü", "U",
+)
+
+func stripAccents(s string) string { return accentRepl.Replace(s) }
+
 func evalTest(ctx context.Context, repo domain.BusinessRepo, cfg *config.Ranking, bf benchFile, now time.Time, t test) result {
 	start := time.Now()
-	opts := domain.SearchOpts{Lat: bf.UserLocation.Lat, Lng: bf.UserLocation.Lng, Now: now, Limit: candidateLimit}
+	o := domain.SearchOpts{Lat: bf.UserLocation.Lat, Lng: bf.UserLocation.Lng, Now: now, Limit: candidateLimit}
 
-	cands, err := repo.Search(ctx, t.Q, opts)
+	cands, err := repo.Search(ctx, t.Q, o)
 	if err != nil {
 		return result{kind: t.Kind, q: t.Q, err: fmt.Errorf("search: %w", err)}
 	}
@@ -136,9 +277,9 @@ func evalTest(ctx context.Context, repo domain.BusinessRepo, cfg *config.Ranking
 	if found {
 		pinPtr = &pin
 	}
-	rankOpts := opts
-	rankOpts.Limit = resultLimit
-	ranked, err := rank.Run(ctx, cands, pinPtr, cfg, rankOpts)
+	ro := o
+	ro.Limit = resultLimit
+	ranked, err := rank.Run(ctx, cands, pinPtr, cfg, ro)
 	if err != nil {
 		return result{kind: t.Kind, q: t.Q, err: fmt.Errorf("rank: %w", err)}
 	}
@@ -151,58 +292,57 @@ func evalTest(ctx context.Context, repo domain.BusinessRepo, cfg *config.Ranking
 	return result{kind: t.Kind, q: t.Q, top1: top1, pass: score(t, ranked, found), pinFired: found, ms: ms}
 }
 
-// score applies the per-kind rule: over_fire passes iff the pin did NOT fire on
-// the bare category word; everything else is pass@3 on expected names.
+// score: over_fire passes iff the pin did NOT fire; else pass@3 on expected.
 func score(t test, ranked []rank.Result, pinFired bool) bool {
 	if t.Kind == "over_fire" {
 		return !pinFired
 	}
-	top := lowerTopNames(ranked, topK)
+	top := make([]string, 0, topK)
+	for i := 0; i < topK && i < len(ranked); i++ {
+		top = append(top, strings.ToLower(ranked[i].Candidate.Name))
+	}
 	for _, want := range t.Expected {
-		if contains(top, strings.ToLower(strings.TrimSpace(want))) {
-			return true
+		w := strings.ToLower(strings.TrimSpace(want))
+		for _, h := range top {
+			if h == w {
+				return true
+			}
 		}
 	}
 	return false
 }
 
-func lowerTopNames(ranked []rank.Result, n int) []string {
-	out := make([]string, 0, n)
-	for i := 0; i < n && i < len(ranked); i++ {
-		out = append(out, strings.ToLower(ranked[i].Candidate.Name))
-	}
-	return out
+func report(label string, total int, results []result) {
+	fmt.Printf("\n=== bench [%s]  n=%d ===\n", label, total)
+	byKind, passN, lat, fails := aggregate(results)
+	printKindSummary(byKind)
+	fmt.Printf("%-12s %d/%d (%.0f%%)\n", "overall", passN, total, pct(passN, total))
+	fmt.Printf("latency: p50=%dms p95=%dms (n=%d, local DB)\n", percentile(lat, 50), percentile(lat, pctl95), len(lat))
+	printFailures(fails)
 }
 
-func contains(haystack []string, needle string) bool {
-	for _, h := range haystack {
-		if h == needle {
-			return true
-		}
-	}
-	return false
-}
-
-func report(label string, results []result) {
-	fmt.Printf("\n=== bench: match-cluster [%s] ===\n", label)
-
-	byKind := map[string][2]int{} // kind -> {pass, total}
-	var passN, total int
-	lat := make([]int64, 0, len(results))
+func aggregate(results []result) (byKind map[string][2]int, passN int, lat []int64, fails []result) {
+	byKind = map[string][2]int{}
+	lat = make([]int64, 0, len(results))
+	fails = make([]result, 0)
 	for _, r := range results {
 		pt := byKind[r.kind]
 		pt[1]++
 		if r.pass && r.err == nil {
 			pt[0]++
 			passN++
+		} else {
+			fails = append(fails, r)
 		}
 		byKind[r.kind] = pt
-		total++
 		if r.err == nil {
 			lat = append(lat, r.ms)
 		}
 	}
+	return byKind, passN, lat, fails
+}
 
+func printKindSummary(byKind map[string][2]int) {
 	kinds := make([]string, 0, len(byKind))
 	for k := range byKind {
 		kinds = append(kinds, k)
@@ -210,28 +350,28 @@ func report(label string, results []result) {
 	sort.Strings(kinds)
 	fmt.Printf("%-12s %s\n", "kind", "pass/total")
 	for _, k := range kinds {
-		fmt.Printf("%-12s %d/%d\n", k, byKind[k][0], byKind[k][1])
+		pt := byKind[k]
+		fmt.Printf("%-12s %d/%d (%.0f%%)\n", k, pt[0], pt[1], pct(pt[0], pt[1]))
 	}
-	fmt.Printf("%-12s %d/%d (%.0f%%)\n", "overall", passN, total, pct(passN, total))
-	fmt.Printf("latency: p50=%dms p95=%dms (n=%d, local DB, cold-start included)\n", p50(lat), p95(lat), len(lat))
+}
 
-	fmt.Println("--- per-test ---")
-	for _, r := range results {
-		status := "PASS"
-		switch {
-		case r.err != nil:
-			status = "ERR "
-		case !r.pass:
-			status = "FAIL"
+func printFailures(fails []result) {
+	if len(fails) == 0 {
+		return
+	}
+	fmt.Printf("--- failures (%d; showing up to %d) ---\n", len(fails), maxFailLines)
+	for i, r := range fails {
+		if i >= maxFailLines {
+			break
 		}
 		detail := fmt.Sprintf("top1=%q", r.top1)
-		if r.kind == "over_fire" {
+		switch {
+		case r.err != nil:
+			detail = "ERR: " + r.err.Error()
+		case r.kind == "over_fire":
 			detail = fmt.Sprintf("pin_fired=%v top1=%q", r.pinFired, r.top1)
 		}
-		if r.err != nil {
-			detail = r.err.Error()
-		}
-		fmt.Printf("  %s [%-10s] %-22q %s\n", status, r.kind, r.q, detail)
+		fmt.Printf("  [%-10s] %-28q %s\n", r.kind, r.q, detail)
 	}
 }
 
@@ -242,15 +382,11 @@ func pct(n, d int) float64 {
 	return float64(n) * 100.0 / float64(d) //nolint:mnd // percent
 }
 
-func p50(xs []int64) int64 { return percentile(xs, 50) }
-func p95(xs []int64) int64 { return percentile(xs, percentile95Num) }
-
 func percentile(xs []int64, p int) int64 {
 	if len(xs) == 0 {
 		return 0
 	}
 	sorted := append([]int64(nil), xs...)
 	sort.Slice(sorted, func(i, j int) bool { return sorted[i] < sorted[j] })
-	idx := (p * (len(sorted) - 1)) / 100
-	return sorted[idx]
+	return sorted[(p*(len(sorted)-1))/100]
 }
