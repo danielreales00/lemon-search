@@ -47,7 +47,9 @@ export default {
       ],
     ],
     'scope-empty': [2, 'never'],
-    'subject-case': [2, 'always', 'lower-case'],
+    // Disallow Title/Sentence/ALL-CAPS subjects, but allow acronyms (CI, API,
+    // SQL, JSON) inside an otherwise lower-case subject.
+    'subject-case': [2, 'never', ['sentence-case', 'start-case', 'pascal-case', 'upper-case']],
     'subject-empty': [2, 'never'],
     'subject-full-stop': [2, 'never', '.'],
     'header-max-length': [2, 'always', 100],

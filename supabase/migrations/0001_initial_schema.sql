@@ -31,9 +31,12 @@ create table if not exists businesses (
   neighborhood         text,
   latitude             double precision,
   longitude            double precision,
-  loc                  earth generated always as (
-                         ll_to_earth(latitude, longitude)
-                       ) stored,
+  -- `loc` is populated at ingest via ll_to_earth(latitude, longitude) (see the
+  -- INSERT…SELECT in docs/data/ingestion.md). It is NOT a STORED generated
+  -- column: ll_to_earth is not immutable enough for a generation expression on
+  -- PG15, but it's fine in an INSERT/UPDATE and the GIST index works on the
+  -- stored values.
+  loc                  earth,
   lemon_score          real,
   google_rating        real,
   google_review_count  integer,

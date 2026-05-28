@@ -108,7 +108,7 @@ polish needs a new utility, it goes in `web/lib/` (a leaf).
 - Considered: Algolia / Meilisearch / Typesense. Why Postgres won at 23k rows.
 
 ## Schema
-- Generated columns do index-time work (loc, photo_count, is_new,
+- Generated columns do index-time work (photo_count, is_new,
   search_vector). Trade-offs.
 - The malformed JSON gotcha; the stream parser.
 

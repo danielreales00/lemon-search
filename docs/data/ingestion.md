@@ -174,17 +174,21 @@ ingestion on the same input produces the same final state, regardless of
 whether the table was empty or pre-populated.
 
 ```sql
-INSERT INTO businesses (col1, col2, …)
-SELECT col1, col2, … FROM stage_businesses
+INSERT INTO businesses (col1, col2, …, loc)
+SELECT col1, col2, …, ll_to_earth(latitude, longitude) FROM stage_businesses
 ON CONFLICT (id) DO UPDATE SET
   name = EXCLUDED.name,
   category = EXCLUDED.category,
+  loc = EXCLUDED.loc,
   …  -- but NOT created_at (preserved from first insert)
 ;
 ```
 
-Generated columns (`loc`, `photo_count`, `is_new`, `search_vector`) are
-recomputed automatically by Postgres.
+`loc` is computed here via `ll_to_earth(latitude, longitude)` — it's a plain
+column, not a STORED generated column (`ll_to_earth` isn't immutable enough for
+a generation expression on PG15, but it's fine inside this INSERT). The true
+generated columns (`photo_count`, `is_new`, `search_vector`) are recomputed
+automatically by Postgres.
 
 ## Performance characteristics
 
