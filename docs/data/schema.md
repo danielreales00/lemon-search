@@ -9,8 +9,8 @@ ranker consumes it.
 
 ```
 businesses (≈ 22,000 rows after non-Miami filter)
-  └── friend_count, is_claimed                 (synthesized at ingest, persisted)
-  └── loc, photo_count, is_new, search_vector  (GENERATED ALWAYS AS … STORED)
+  └── friend_count, is_claimed, loc, search_vector  (computed at ingest, persisted)
+  └── photo_count, is_new                           (GENERATED ALWAYS AS … STORED)
 ```
 
 No related tables in V1. (See [adr/0003-ranking-strategy.md](../adr/0003-ranking-strategy.md)
@@ -47,7 +47,7 @@ Valid `archetype` values:
 | `neighborhood` | `text` | yes | Lemon JSON `neighborhood` | Free text, surfaced in UI; 91% coverage |
 | `latitude` | `double precision` | yes | Lemon JSON `latitude` | 97% coverage; rows with `NULL` lat/lng are still indexed but contribute distance=∞ |
 | `longitude` | `double precision` | yes | Lemon JSON `longitude` | Same |
-| `loc` | `earth` (STORED) | yes | `ll_to_earth(latitude, longitude)` | Indexed with GIST; used by `earth_distance` |
+| `loc` | `earth` | yes | `ll_to_earth(latitude, longitude)`, set in the ingest `INSERT…SELECT` | Indexed with GIST; used by `earth_distance`. Not a STORED generated column — `ll_to_earth` isn't immutable enough for a generation expression on PG15, but it's fine in an INSERT. |
 
 ### Ratings + popularity
 
@@ -91,7 +91,7 @@ Valid `archetype` values:
 | `is_claimed` | `boolean` | no (default `false`) | Synthesized at ingest from `lemon_seed(id)` correlated with photo+rating presence | ~35% true. Used by `claimed_signal` (1.0 / 0.0). |
 | `friend_count` | `integer` | no (default `0`) | Synthesized at ingest; ~3% of rows get 1–5 | Used by `friend_signal = min(friend_count / 5, 1.0)`. **Demo-only denormalization.** |
 | `is_new` | `boolean` (STORED) | no | `coalesce(google_review_count, 0) < 10` | Generated. Triggers rating-demote + de-pin pass. |
-| `search_vector` | `tsvector` (STORED) | no | Weighted `to_tsvector` over name/subcategory/category/specialty/specific_tags/about | Generated. Indexed with GIN. The text-relevance side of retrieval. |
+| `search_vector` | `tsvector` | yes | Weighted `to_tsvector` over name/subcategory/category/specialty/specific_tags/about, set in the ingest `INSERT…SELECT` | Indexed with GIN. The text-relevance side of retrieval. Not a STORED generated column — `to_tsvector` with a text-literal config isn't immutable enough for a generation expression on PG15, but it's fine in an INSERT. |
 
 `search_vector` weights:
 

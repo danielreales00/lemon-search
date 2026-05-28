@@ -51,41 +51,42 @@ components:
     in: cmd/ingest/**
 
 # ------- import rules -------
+# `mayDependOn` is an allowlist: anything not listed is forbidden. (There is no
+# `cannotDependOn` in go-arch-lint — the allowlist already implies it.)
 deps:
-  # domain is pure
+  # domain is pure: NO internal-component deps (mayDependOn: []). The component-
+  # imports linter enforces that. Vendor checks are global (allow.depOnAnyVendor),
+  # so anyVendorDeps:true here is a no-op that just satisfies go-arch-lint's
+  # "must allow something" rule. domain's no-vendor intent is also enforced by
+  # the `domain-pure` depguard rule in .golangci.yml.
   domain:
     mayDependOn: []
-    cannotDependOn: [api, intent, rank, config, observ, retrieve-postgres]
-    anyVendorDeps: false   # not even vendor packages
+    anyVendorDeps: true
 
-  # observ is a leaf utility (used by everyone above)
+  # observ is a leaf utility (used by everyone above); no internal-component deps.
   observ:
     mayDependOn: []
-    cannotDependOn: [api, intent, rank, config, retrieve-postgres, domain]
+    anyVendorDeps: true
 
   # config can only see domain (loads typed config into domain shapes)
   config:
     mayDependOn: [domain]
     canUse: [yaml]
-    cannotDependOn: [api, intent, rank, retrieve-postgres, observ]
 
   # intent: lexicon → overlay; only domain types
   intent:
     mayDependOn: [domain]
-    cannotDependOn: [api, rank, retrieve-postgres, config]
     anyVendorDeps: false
 
   # rank: pure scoring; sees domain types + config
   rank:
     mayDependOn: [domain, config]
-    cannotDependOn: [api, retrieve-postgres, intent]
     anyVendorDeps: false
 
   # retrieve-postgres: DB adapter; sees domain only
   retrieve-postgres:
     mayDependOn: [domain]
     canUse: [pgx, pgxpool]
-    cannotDependOn: [api, rank, intent, config]
 
   # api: HTTP transport; composes everything except cmd
   api:
@@ -101,9 +102,3 @@ deps:
   cmd-ingest:
     mayDependOn: [domain, retrieve-postgres, config, observ]
     canUse: [pgx, pgxpool, yaml]
-
-# ------- common, repeated files exemptions -------
-commonComponents: []
-
-# ------- assertions: enforce mandatory components present -------
-exposedVendors: []

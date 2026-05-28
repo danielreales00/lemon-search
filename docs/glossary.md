@@ -2,6 +2,8 @@
 
 Terms used across the docs. Alphabetical.
 
+## Terms
+
 ### Archetype
 One of six labels assigned to every business at ingest time, based on its
 spec category. Determines the per-signal weights used when scoring. Values:

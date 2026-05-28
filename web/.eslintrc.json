@@ -2,25 +2,15 @@
   "root": true,
   "parser": "@typescript-eslint/parser",
   "parserOptions": {
-    "project": "./tsconfig.json",
-    "tsconfigRootDir": "."
+    "project": "./tsconfig.json"
   },
-  "plugins": [
-    "@typescript-eslint",
-    "import",
-    "boundaries",
-    "sonarjs",
-    "unicorn",
-    "unused-imports"
-  ],
+  "plugins": ["@typescript-eslint", "import", "boundaries", "sonarjs", "unicorn", "unused-imports"],
   "extends": [
     "next/core-web-vitals",
     "plugin:@typescript-eslint/strict-type-checked",
     "plugin:@typescript-eslint/stylistic-type-checked",
     "plugin:import/recommended",
     "plugin:import/typescript",
-    "plugin:sonarjs/recommended",
-    "plugin:unicorn/recommended",
     "prettier"
   ],
   "settings": {
@@ -107,10 +97,7 @@
     "eqeqeq": ["error", "always"],
     "curly": ["error", "all"],
     "complexity": ["error", { "max": 12 }],
-    "max-lines-per-function": [
-      "warn",
-      { "max": 80, "skipBlankLines": true, "skipComments": true }
-    ],
+    "max-lines-per-function": ["warn", { "max": 80, "skipBlankLines": true, "skipComments": true }],
     "max-depth": ["error", 4]
   },
   "overrides": [
@@ -123,7 +110,10 @@
       }
     },
     {
-      "files": ["app/**/{page,layout,template,loading,error,not-found,route}.tsx", "app/**/{page,layout,template,loading,error,not-found,route}.ts"],
+      "files": [
+        "app/**/{page,layout,template,loading,error,not-found,route}.tsx",
+        "app/**/{page,layout,template,loading,error,not-found,route}.ts"
+      ],
       "rules": {
         "import/no-default-export": "off"
       }

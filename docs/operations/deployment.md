@@ -169,7 +169,7 @@ Or, equivalent via UI: <https://fly.io/apps/lemon-search-api/monitoring>
 ### FE (Vercel)
 
 Promote a previous deployment via the Vercel dashboard
-(<https://vercel.com/<org>/lemon-search-web/deployments>): pick a
+(`https://vercel.com/<org>/lemon-search-web/deployments`): pick a
 green deployment, click **Promote to Production**.
 
 ### Database

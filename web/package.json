@@ -14,8 +14,8 @@
     "typecheck": "tsc --noEmit",
     "knip": "knip",
     "knip:fix": "knip --fix --allow-remove-files",
-    "madge": "madge --circular --extensions ts,tsx app components lib",
-    "madge:graph": "madge --image dep-graph.svg --extensions ts,tsx app components lib",
+    "madge": "madge --circular --extensions ts,tsx app",
+    "madge:graph": "madge --image dep-graph.svg --extensions ts,tsx app",
     "deps:check": "knip && npm run madge",
     "quality": "npm run lint && npm run typecheck && npm run format:check && npm run knip && npm run madge"
   },

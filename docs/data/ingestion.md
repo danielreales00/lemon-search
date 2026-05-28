@@ -174,17 +174,32 @@ ingestion on the same input produces the same final state, regardless of
 whether the table was empty or pre-populated.
 
 ```sql
-INSERT INTO businesses (col1, col2, …)
-SELECT col1, col2, … FROM stage_businesses
+INSERT INTO businesses (col1, col2, …, loc, search_vector)
+SELECT
+  col1, col2, …,
+  ll_to_earth(latitude, longitude),
+  setweight(to_tsvector('english', coalesce(name,'')), 'A')
+    || setweight(to_tsvector('english', coalesce(subcategory,'')), 'B')
+    || setweight(to_tsvector('english', coalesce(category,'')), 'C')
+    || setweight(to_tsvector('english', coalesce(specialty,'')), 'C')
+    || setweight(to_tsvector('english',
+         array_to_string(coalesce(specific_tags,'{}'), ' ')), 'C')
+    || setweight(to_tsvector('english', coalesce(about,'')), 'D')
+FROM stage_businesses
 ON CONFLICT (id) DO UPDATE SET
   name = EXCLUDED.name,
   category = EXCLUDED.category,
+  loc = EXCLUDED.loc,
+  search_vector = EXCLUDED.search_vector,
   …  -- but NOT created_at (preserved from first insert)
 ;
 ```
 
-Generated columns (`loc`, `photo_count`, `is_new`, `search_vector`) are
-recomputed automatically by Postgres.
+`loc` and `search_vector` are computed here (via `ll_to_earth` and the weighted
+`to_tsvector` expression) — they're plain columns, not STORED generated columns,
+because neither expression is immutable enough for a generation expression on
+PG15, but both are fine inside this INSERT. The true generated columns
+(`photo_count`, `is_new`) are recomputed automatically by Postgres.
 
 ## Performance characteristics
 
