@@ -53,10 +53,12 @@ type Candidate struct {
     GoogleReviewCount   int
     PriceRange          *string           // '$' | '$$' | '$$$' | '$$$$'
     PhotoCount          int
+    PhotoURL            *string           // first photo (photos[1]); FE thumbnail; nil if none
     IsClaimed           bool
     FriendCount         int
     IsNew               bool
-    IsOpenNow           *bool             // nil if hours unknown
+    IsOpenNow           *bool             // nil if hours unknown; false = closed at opts.Now
+    OpensLater          bool              // closed now but reopens before midnight → 0.3 open-status
     Hours               json.RawMessage   // passthrough for FE display
     TextScore           float64           // ts_rank_cd
     NameTrigram         float64           // similarity(name, q)
