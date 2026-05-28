@@ -23,7 +23,10 @@ import (
 	pgxpool "github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/danielreales00/lemon-search/api/internal/api"
+	"github.com/danielreales00/lemon-search/api/internal/config"
+	"github.com/danielreales00/lemon-search/api/internal/domain"
 	"github.com/danielreales00/lemon-search/api/internal/observ"
+	pgrepo "github.com/danielreales00/lemon-search/api/internal/retrieve/postgres"
 )
 
 // Stamped at link time via -ldflags '-X main.version=... -X main.commit=... -X main.date=...'.
@@ -34,10 +37,11 @@ var (
 )
 
 const (
-	defaultPort     = "8080"
-	shutdownTimeout = 10 * time.Second
-	readHeaderTO    = 5 * time.Second
-	statementTO     = "1000" // ms; per-query Postgres statement_timeout (docs/api.md)
+	defaultPort        = "8080"
+	defaultRankingPath = "config/ranking.yaml"
+	shutdownTimeout    = 10 * time.Second
+	readHeaderTO       = 5 * time.Second
+	statementTO        = "1000" // ms; per-query Postgres statement_timeout (docs/api.md)
 )
 
 func main() {
@@ -53,13 +57,27 @@ func main() {
 }
 
 func run(ctx context.Context, logger *slog.Logger) error {
-	pinger, closePool := openPool(ctx, logger, os.Getenv("LEMON_DATABASE_URL"))
+	pool, closePool := openPool(ctx, logger, os.Getenv("LEMON_DATABASE_URL"))
 	defer closePool()
+
+	var pinger api.Pinger = notReady{}
+	var repo domain.BusinessRepo
+	if pool != nil {
+		pinger = pool
+		r, err := pgrepo.New(pool)
+		if err != nil {
+			logger.Warn("could not build search repository", slog.String("err", err.Error()))
+		} else {
+			repo = r
+		}
+	}
+
+	cfg := loadRanking(logger, os.Getenv("LEMON_RANKING_CONFIG"))
 
 	build := api.BuildInfo{Version: version, Commit: commit, Date: date}
 	srv := &http.Server{
 		Addr:              addr(),
-		Handler:           api.New(logger, pinger, build).Handler(),
+		Handler:           api.New(logger, pinger, repo, cfg, build).Handler(),
 		ReadHeaderTimeout: readHeaderTO,
 	}
 
@@ -70,25 +88,41 @@ func run(ctx context.Context, logger *slog.Logger) error {
 // empty (e.g. CI smoke tests without a DB) it logs a warning and returns a
 // stub Pinger that always reports not-ready, so /healthz still works and
 // /readyz reports 503 without crashing the server.
-func openPool(ctx context.Context, logger *slog.Logger, url string) (api.Pinger, func()) {
+func openPool(ctx context.Context, logger *slog.Logger, url string) (*pgxpool.Pool, func()) {
 	if url == "" {
-		logger.Warn("LEMON_DATABASE_URL is empty; starting without a database (/readyz will report not ready)")
-		return notReady{}, func() {}
+		logger.Warn("LEMON_DATABASE_URL is empty; starting without a database (/readyz and /search degraded)")
+		return nil, func() {}
 	}
 
 	cfg, err := pgxpool.ParseConfig(url)
 	if err != nil {
 		logger.Warn("invalid LEMON_DATABASE_URL; starting without a database", slog.String("err", err.Error()))
-		return notReady{}, func() {}
+		return nil, func() {}
 	}
 	cfg.ConnConfig.RuntimeParams["statement_timeout"] = statementTO
 
 	pool, err := pgxpool.NewWithConfig(ctx, cfg)
 	if err != nil {
 		logger.Warn("could not create database pool; starting without a database", slog.String("err", err.Error()))
-		return notReady{}, func() {}
+		return nil, func() {}
 	}
 	return pool, pool.Close
+}
+
+// loadRanking reads the ranking config from path (or the default when path is
+// empty). On failure it logs and returns nil so the server still boots and
+// /search reports 503 — main stays deployable even with a missing config.
+func loadRanking(logger *slog.Logger, path string) *config.Ranking {
+	if path == "" {
+		path = defaultRankingPath
+	}
+	cfg, err := config.LoadFile(path)
+	if err != nil {
+		logger.Warn("could not load ranking config; /search will be unavailable",
+			slog.String("path", path), slog.String("err", err.Error()))
+		return nil
+	}
+	return cfg
 }
 
 // serve runs srv until the context is canceled, then shuts it down gracefully.

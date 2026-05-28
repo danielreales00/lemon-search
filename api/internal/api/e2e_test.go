@@ -24,6 +24,9 @@ import (
 	"time"
 
 	pgxpool "github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/danielreales00/lemon-search/api/internal/config"
+	"github.com/danielreales00/lemon-search/api/internal/retrieve/postgres"
 )
 
 const e2eDefaultDB = "postgres://postgres:postgres@localhost:54322/postgres?sslmode=disable"
@@ -80,7 +83,7 @@ func TestE2EHealthReadinessVersion(t *testing.T) {
 
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	build := BuildInfo{Version: "e2e", Commit: "e2e", Date: "2026-05-28T00:00:00Z"}
-	srv := httptest.NewServer(New(log, pool, build).Handler())
+	srv := httptest.NewServer(New(log, pool, nil, nil, build).Handler())
 	defer srv.Close()
 	client := srv.Client()
 
@@ -93,5 +96,58 @@ func TestE2EHealthReadinessVersion(t *testing.T) {
 	}
 	if code, body := getJSON(t, client, srv.URL+"/version"); code != http.StatusOK || body["version"] == "" {
 		t.Fatalf("/version = %d %v, want 200 with a version", code, body)
+	}
+}
+
+// TestE2ESearch drives /search over real HTTP against the live DB with the real
+// retrieval adapter + ranker wired in — the full production path. The CI DB is
+// migrated but unseeded, so results may be empty; the contract is a 200 with a
+// non-null results array and per-stage timings.
+func TestE2ESearch(t *testing.T) {
+	pool := e2ePool(t)
+	defer pool.Close()
+
+	repo, err := postgres.New(pool)
+	if err != nil {
+		t.Fatalf("postgres.New: %v", err)
+	}
+	cfg, err := config.LoadFile("../../../config/ranking.yaml")
+	if err != nil {
+		t.Fatalf("load ranking config: %v", err)
+	}
+
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	build := BuildInfo{Version: "e2e", Commit: "e2e", Date: "2026-05-28T00:00:00Z"}
+	srv := httptest.NewServer(New(log, pool, repo, cfg, build).Handler())
+	defer srv.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, srv.URL+"/search?q=coffee", http.NoBody)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	resp, err := srv.Client().Do(req)
+	if err != nil {
+		t.Fatalf("GET /search: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("/search status = %d, want 200", resp.StatusCode)
+	}
+	var body struct {
+		Query   string           `json:"query"`
+		Results []map[string]any `json:"results"`
+		Timings map[string]int64 `json:"timings"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode /search: %v", err)
+	}
+	if body.Results == nil {
+		t.Fatalf("results must be a (possibly empty) array, got null")
+	}
+	if _, ok := body.Timings["total_ms"]; !ok {
+		t.Fatalf("timings.total_ms missing: %v", body.Timings)
 	}
 }
