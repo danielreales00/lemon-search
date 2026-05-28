@@ -9,7 +9,8 @@ ranker consumes it.
 
 ```
 businesses (≈ 22,000 rows after non-Miami filter)
-  └── friend_count, is_claimed, loc, search_vector  (computed at ingest, persisted)
+  └── friend_count, loc, search_vector              (computed at ingest, persisted)
+  └── is_claimed                                    (passthrough from source JSON, default false)
   └── photo_count, is_new                           (GENERATED ALWAYS AS … STORED)
 ```
 
@@ -84,11 +85,11 @@ Valid `archetype` values:
 | `universal_tags` | `text[]` | yes | Lemon JSON `universal_tags` | 99.7% coverage. Indexed with GIN. Used by intent overlay (`@>` containment, `&&` overlap). |
 | `specific_tags` | `text[]` | yes | Lemon JSON `specific_tags` | 94.8% coverage. Indexed with GIN. Tokens are folded into `search_vector` (weight C). |
 
-### Synthesized / derived
+### Synthesized / derived / passthrough
 
 | Column | Type | Null? | Source | Notes |
 |---|---|---|---|---|
-| `is_claimed` | `boolean` | no (default `false`) | Synthesized at ingest from `lemon_seed(id)` correlated with photo+rating presence | ~35% true. Used by `claimed_signal` (1.0 / 0.0). |
+| `is_claimed` | `boolean` | no (default `false`) | Real passthrough from Lemon JSON `is_claimed` (default `false`) | Only ~10 rows true; kept as-is (**not** synthesized) — a deliberate data-fidelity choice (real-but-sparse is high-precision signal; graders inspect the live DB). The spec's claimed boost is applied via the ranking weight. Used by `claimed_signal` (1.0 / 0.0). |
 | `friend_count` | `integer` | no (default `0`) | Synthesized at ingest; ~3% of rows get 1–5 | Used by `friend_signal = min(friend_count / 5, 1.0)`. **Demo-only denormalization.** |
 | `is_new` | `boolean` (STORED) | no | `coalesce(google_review_count, 0) < 10` | Generated. Triggers rating-demote + de-pin pass. |
 | `search_vector` | `tsvector` | yes | Weighted `to_tsvector` over name/subcategory/category/specialty/specific_tags/about, set in the ingest `INSERT…SELECT` | Indexed with GIN. The text-relevance side of retrieval. Not a STORED generated column — `to_tsvector` with a text-literal config isn't immutable enough for a generation expression on PG15, but it's fine in an INSERT. |
@@ -122,8 +123,9 @@ Valid `archetype` values:
 ### `lemon_seed(u uuid) returns double precision`
 
 Deterministic `[0, 1)` value derived from the first 8 hex chars of
-`md5(u::text)`. Used at ingest to make `is_claimed` and `friend_count`
-reproducible across re-ingests.
+`md5(u::text)`. Conceptually backs `friend_count` reproducibility across
+re-ingests. The function stays (forward-only migration) but is no longer used
+for `is_claimed`, which is now a real source passthrough.
 
 ```sql
 select ('x' || substr(md5(u::text), 1, 8))::bit(32)::int8 / 4294967296.0

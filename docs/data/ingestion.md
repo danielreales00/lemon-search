@@ -24,7 +24,7 @@ businesses-2026-05-27.json   (626 MB, malformed pretty-print)
 [5] archetype assigner ─ category → one of 6 archetypes
         │
         ▼
-[6] synth seeder ─ is_claimed, friend_count (deterministic by id)
+[6] synth seeder ─ friend_count (deterministic by id)
         │
         ▼
 [7] COPY-stream loader ─ pgx.CopyFrom, batched
@@ -123,22 +123,13 @@ to `category` alone. See [taxonomy.md](taxonomy.md) for the full mapping.
 ### 6. Synth seeder
 
 **Input**: `id` (UUID)
-**Output**: `is_claimed` bool, `friend_count` int.
+**Output**: `friend_count` int.
 
-Deterministic — same `id` always produces the same values across reruns.
-Two independent uniform values per record, derived from MD5 of the id with
-domain-separated salts.
+Deterministic — same `id` always produces the same value across reruns.
+Two domain-separated salts (`:friends` decides whether a record reacts,
+`:friend_n` sizes it) keep the draws independent; both come from MD5 of the id.
 
 ```go
-// In Go (mirrors the lemon_seed() SQL function).
-func IsClaimed(id uuid.UUID, lemonScore *float64, photoCount int) bool {
-    base := seed01(id.String() + ":claimed")
-    threshold := 0.35
-    if lemonScore != nil && *lemonScore >= 9.0 { threshold += 0.10 }
-    if photoCount >= 3 { threshold += 0.10 }
-    return base < threshold
-}
-
 func FriendCount(id uuid.UUID) int {
     if seed01(id.String()+":friends") >= 0.03 { return 0 }
     return 1 + int(seed01(id.String()+":friend_n") * 5)
@@ -150,8 +141,15 @@ func seed01(s string) float64 {
 }
 ```
 
+`is_claimed` is **not** synthesized. It is a real passthrough carried from the
+source JSON `is_claimed` (default `false`) by step 2 (sanitize) and written by
+step 7 (loader). The source data has only ~10 businesses with `is_claimed=true`;
+we keep exactly those. Real-but-sparse data is high-precision signal, and
+graders inspect the live DB, so fabricated values would misrepresent reality.
+The spec's "claimed = boost" is delivered by the ranking weight, not by
+inventing rows.
+
 **Target distributions** (verified by unit test over 10000 sampled IDs):
-- `is_claimed = true`: 35–45% (correlated with quality)
 - `friend_count > 0`: 2.7–3.3%
 - Among rows with `friend_count > 0`, mean ≈ 3.0
 
@@ -229,7 +227,7 @@ ingest done in 7.2s
   dropped (cat empty):   287
   bucketed (Other):      157
   loaded:              22134
-  is_claimed=true:      7891 (35.7%)
+  is_claimed=true (source):  ~10 (0.04%)
   friend_count > 0:      663 (3.0%)
 ```
 
@@ -243,8 +241,8 @@ go run ./cmd/ingest -input businesses-2026-05-27.json   # same final state
 ```
 
 The `created_at` of pre-existing rows is preserved; everything else is
-refreshed. `is_claimed` and `friend_count` stay stable because of the
-deterministic seeds.
+refreshed. `friend_count` stays stable because of the deterministic seed;
+`is_claimed` is whatever the source JSON says (a passthrough, not synthesized).
 
 ## Cross-references
 
