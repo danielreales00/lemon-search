@@ -28,9 +28,11 @@ import (
 	"github.com/danielreales00/lemon-search/api/internal/observ"
 )
 
-// statementTO bounds any single ingest statement (the per-batch COPY and the
-// final upsert) at the project-wide 1s, matching the API pool.
-const statementTO = "1000" // ms
+// statementTO bounds any single ingest statement. The API pool uses 1s because
+// it serves the latency-sensitive query path; ingest instead runs a bulk upsert
+// over ~22k rows (computing loc + search_vector per row) that legitimately takes
+// seconds, so it gets a generous batch-job cap rather than the 1s query cap.
+const statementTO = "300000" // ms (5 min); batch ingest, not the API's 1s
 
 func main() {
 	logger := observ.New(os.Getenv("LEMON_LOG_LEVEL"))
@@ -98,8 +100,8 @@ func run(ctx context.Context, logger *slog.Logger, input string) error {
 	return nil
 }
 
-// openPool builds a pgx pool with the 1s per-statement timeout used everywhere
-// in the service.
+// openPool builds the ingest pgx pool with a generous batch statement timeout
+// (see statementTO) — long enough for the bulk upsert over the full dataset.
 func openPool(ctx context.Context, url string) (*pgxpool.Pool, error) {
 	cfg, err := pgxpool.ParseConfig(url)
 	if err != nil {
