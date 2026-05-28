@@ -51,6 +51,8 @@ components:
     in: cmd/api/**
   cmd-ingest:
     in: cmd/ingest/**
+  cmd-bench-runner:
+    in: cmd/bench-runner/**
 
 # ------- import rules -------
 # `mayDependOn` is an allowlist: anything not listed is forbidden. (There is no
@@ -110,3 +112,8 @@ deps:
   cmd-ingest:
     mayDependOn: [domain, ingest, retrieve-postgres, config, observ]
     canUse: [pgx, pgxpool, yaml]
+
+  # cmd-bench-runner: in-process bench harness; wires repo + ranker like cmd-api
+  cmd-bench-runner:
+    mayDependOn: [domain, config, rank, retrieve-postgres]
+    canUse: [pgx, pgxpool]
