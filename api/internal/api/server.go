@@ -5,6 +5,9 @@ import (
 	"log/slog"
 	"net/http"
 	"time"
+
+	"github.com/danielreales00/lemon-search/api/internal/config"
+	"github.com/danielreales00/lemon-search/api/internal/domain"
 )
 
 // readyTimeout bounds the DB ping behind /readyz so a stalled database never
@@ -31,18 +34,22 @@ type BuildInfo struct {
 type Server struct {
 	log    *slog.Logger
 	pinger Pinger
+	repo   domain.BusinessRepo
+	cfg    *config.Ranking
 	build  BuildInfo
 }
 
 // New wires the HTTP server dependencies. It accepts interfaces and returns a
-// concrete *Server; callers obtain the routed handler via Handler.
-func New(log *slog.Logger, pinger Pinger, build BuildInfo) *Server {
-	return &Server{log: log, pinger: pinger, build: build}
+// concrete *Server; callers obtain the routed handler via Handler. repo and cfg
+// may be nil — /search then reports 503, while the health endpoints still work.
+func New(log *slog.Logger, pinger Pinger, repo domain.BusinessRepo, cfg *config.Ranking, build BuildInfo) *Server {
+	return &Server{log: log, pinger: pinger, repo: repo, cfg: cfg, build: build}
 }
 
 // Handler returns the fully routed http.Handler with request logging applied.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /search", s.handleSearch)
 	mux.HandleFunc("GET /healthz", s.handleHealthz)
 	mux.HandleFunc("GET /readyz", s.handleReadyz)
 	mux.HandleFunc("GET /version", s.handleVersion)
