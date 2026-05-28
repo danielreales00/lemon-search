@@ -108,5 +108,5 @@ deps:
 
   # cmd-ingest: ingestion CLI; no HTTP needed
   cmd-ingest:
-    mayDependOn: [domain, retrieve-postgres, config, observ]
+    mayDependOn: [domain, ingest, retrieve-postgres, config, observ]
     canUse: [pgx, pgxpool, yaml]
