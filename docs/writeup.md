@@ -89,6 +89,23 @@ deployed `/search` endpoint with a query pool simulating one-keystroke-per-RPS.
 - **Archetype assignment** — strictly per-business via category mapping.
   Intent extraction does *not* override archetype; it only narrows
   retrieval. (See ranking decision D6.)
+- **Exact-name "boost" vs. category-aware matching** — the spec lists these as
+  *separate* behaviors with deliberate verbs: a name "returns that business
+  first, **regardless** of other ranking signals" (a hard override) vs. a prefix
+  "**surfaces**" a match (rank, don't override). Our first pass pinned on
+  `name ILIKE q || '%'`, which conflated them — `coffee` pinned "Coffee To Go",
+  `sushi` pinned "Sushi Joe" over far better results, though both are *category*
+  leaves in the taxonomy (Café→Coffee Shop, Casual/Fast→Sushi). **The deeper
+  tension:** trigram similarity can't separate a typo'd *full name* from a
+  *category prefix* — measured, the spec's own `joes barbr shop → Joe's Barber
+  Shop` scores **0.57**, the same band as the false positives (`coffee` 0.54,
+  `sushi` 0.60), so *no single threshold separates them*. Since the pin is a
+  max-cost override (a false positive is catastrophic; a false negative merely
+  demotes a still-ranked result), we took the **high-precision call**: pin only
+  on `similarity ≥ 0.85` (dropped the bare prefix clause). The real
+  discriminator is name *coverage* + *taxonomy membership*, deferred to the
+  Stage-3 intent layer (where the pin also folds into main retrieval for real
+  distance + one fewer round-trip).
 - **Rubric says 4 archetypes, body lists 6** — we implemented 6 per the body.
 
 ## What's broken / known gaps
@@ -104,6 +121,11 @@ deployed `/search` endpoint with a query pool simulating one-keystroke-per-RPS.
 - **~3% non-Miami records dropped** at ingestion (including Versailles, FR).
 - **Friend signal denormalized** as `friend_count` on `businesses`. Real
   multi-user Lemon needs a per-user join.
+- **Exact-name pin is conservative (Stage 2)** — pins only near-identical names
+  (`similarity ≥ 0.85`); typo'd full names like "joes barbr shop" currently fall
+  through to normal ranking (still surfaced, just not hard-pinned) rather than
+  risk pinning category words. Proper coverage + taxonomy-suppressed pin is
+  Stage-3 intent work.
 - **No diversity (MMR)** — coffee chains can clump near the top of `coffee`.
 - **No personalization** — no learning loop, no per-user history.
 

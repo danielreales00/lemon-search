@@ -222,7 +222,7 @@ The retrieval phase runs a separate SQL query for the exact-name path:
 
 ```sql
 SELECT … FROM businesses
-WHERE similarity(name, $q) >= 0.85 OR name ILIKE $q || '%'
+WHERE similarity(name, $q) >= 0.85
 ORDER BY similarity(name, $q) DESC
 LIMIT 1
 ```
@@ -238,6 +238,29 @@ honor "regardless" literally — sort order puts it first; tie-break never
 kicks in.
 
 The 0.85 threshold lives in `config.exact_name.similarity_threshold`.
+
+### Why similarity-only, not a bare prefix (realignment 2026-05-28)
+
+An earlier version also pinned on `name ILIKE $q || '%'`. That conflated two
+**separate** spec requirements with deliberately different verbs — exact name
+"returns that business first, **regardless** of other ranking signals" (a hard
+override) vs. partial/prefix "**surfaces** `best steakhouse`" (rank, don't
+override) — and over-fired: `coffee` pinned "Coffee To Go", `sushi` pinned
+"Sushi Joe", both *category* leaves in the taxonomy. Prefix/partial recall is
+`search_candidates`' job (ranked), not the pin, so the `ILIKE` clause is gone.
+
+**Known Stage-2 limitation.** Trigram alone cannot separate a typo'd *full
+name* from a *category prefix* — measured on the data, the spec's own example
+`joes barbr shop → Joe's Barber Shop` scores ≈ **0.57**, the *same band* as the
+false positives (`coffee`→"Coffee To Go" 0.54, `sushi`→"Sushi Joe" 0.60), so no
+single threshold separates them. Because the pin is a max-cost override (a false
+positive is catastrophic; a false negative merely demotes a still-ranked
+result), 0.85 is deliberately conservative — only near-exact names pin. The
+proper discriminator is name **coverage** (the query spans most of the full
+name) **AND** suppression when the query is a known taxonomy term; that is
+**deferred to the Stage-3 intent layer** (the lexicon already knows
+`coffee`/`sushi` are categories), where the pin also folds into the main
+retrieval so it gets real distance and drops a per-keystroke round-trip.
 
 ## Tie-breaking (step 7)
 
