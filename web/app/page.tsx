@@ -1,8 +1,13 @@
+import { apiBaseUrl } from '@/lib/api';
+
 export default function HomePage(): React.JSX.Element {
   return (
     <main className="container">
       <h1 className="title">Lemon Search</h1>
       <p className="tagline">All services, one app.</p>
+      <p className="tagline">
+        API endpoint: <code>{apiBaseUrl}</code>
+      </p>
       {/* Search bar component lands in Stage 2 (see docs/roadmap/02-search-core.md). */}
     </main>
   );
