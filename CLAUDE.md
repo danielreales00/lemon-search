@@ -209,7 +209,10 @@ CI. Highlights:
 - **Drift**: `go-arch-lint` + `depguard`; `eslint-plugin-boundaries`.
 - **Duplication**: `dupl`, `goconst`; `sonarjs/no-duplicate-string`.
 - **Secrets**: `gitleaks` (staged + history + CI).
-- **Tests**: `go test -race`; ranker covered ≥90% against fixtures.
+- **Tests**: three tiers by build tag — **unit** (untagged, pure, `go test -race
+  ./...`), **integration** (`-tags=integration`), **e2e** (`-tags=e2e`); both
+  DB-backed tiers run vs a real Postgres in CI. Core (`rank`/`intent`/`config`)
+  ≥90% via `scripts/ci/coverage-gate.sh`. See `docs/development.md` (Tests).
 - **Migrations**: idempotent — CI applies them twice.
 - `--max-warnings=0` everywhere.
 

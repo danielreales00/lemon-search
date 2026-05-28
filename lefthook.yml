@@ -118,11 +118,17 @@ pre-push:
     # --- Go duplicate-code report (informational alongside golangci-lint dupl) ---
     # dupl is already part of golangci-lint enabled set; nothing extra here.
 
-    # --- Full Go tests with race detector ---
+    # --- Full Go unit tests with race detector (pure; DB tiers run in CI) ---
     go-test:
       tags: go
       glob: "api/**/*.go"
       run: cd api && go test -race -timeout=2m ./...
+
+    # --- Core coverage gate: rank/intent/config >= 90% (pure; no DB) ---
+    go-cover-gate:
+      tags: go
+      glob: "api/**/*.go"
+      run: ./scripts/ci/coverage-gate.sh
 
     # --- Go build sanity ---
     go-build:

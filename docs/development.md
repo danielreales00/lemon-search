@@ -34,8 +34,8 @@ lefthook run pre-push  --all-files
 | Action | What runs |
 |---|---|
 | `git commit -m "feat(api): …"` | commitlint (commit-msg); then on pre-commit: gofumpt diff, golangci-lint fast, go-arch-lint, eslint+prettier, madge cycles, markdownlint, gitleaks staged, big-file/env guards |
-| `git push` | golangci-lint full, go-arch-lint full, go test -race, go build, tsc, eslint full, knip (dead code/exports/deps), gitleaks history |
-| Open PR | CI runs all the pre-push checks plus migrations-idempotency, web build, conventional-commit history check |
+| `git push` | golangci-lint full, go-arch-lint full, go test -race (unit), core coverage gate, go build, tsc, eslint full, knip (dead code/exports/deps), gitleaks history |
+| Open PR | CI runs all the pre-push checks plus the **integration + e2e tiers** (real Postgres), migrations-idempotency, web build, conventional-commit history check |
 
 ## Quality gates (what stops a bad change)
 
@@ -43,6 +43,43 @@ lefthook run pre-push  --all-files
 - **Go**: `errcheck`, `staticcheck` (whole-program), `govet` (enable-all), `errorlint`, `bodyclose`, `sqlclosecheck`, `rowserrcheck`, `contextcheck`, `nilerr`, `noctx`, `exhaustive`.
 - **TS**: `@typescript-eslint/strict-type-checked` + `stylistic-type-checked`, `no-floating-promises`, `no-misused-promises`, strict `tsconfig` (`noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`).
 - **SQL**: migrations applied **twice** in CI; idempotency required.
+
+### Tests (three tiers)
+
+Tests are split into three tiers, separated by Go **build tags** so each runs in
+its own CI job and none can silently skip (the tag physically excludes a file
+from the wrong lane):
+
+| Tier | Build tag | Covers | DB? | CI job |
+|---|---|---|---|---|
+| **unit** | _(none)_ | pure logic — ranker, intent, config, ingest stages, HTTP handlers with fake deps | no | `Go · unit test` |
+| **integration** | `integration` | one component against real infra — e.g. the COPY loader against Postgres | yes | `Go · integration test` |
+| **e2e** | `e2e` | the fully-wired handler over real HTTP against a live DB (`/readyz` really pings) | yes | `Go · e2e test` |
+
+Rules (strict — these fail the build):
+
+- **Unit tests stay pure** — no network, DB, or filesystem beyond fixtures — so
+  the default `go test ./...` is fast and hermetic. Anything touching Postgres
+  goes behind the `integration` or `e2e` tag.
+- **Both DB-backed tiers run in CI** against a `postgres:15` service with the
+  migrations applied. They `t.Skip` (not fail) when no DB is reachable, so a bare
+  tagged run off-CI is a no-op, not a red failure.
+- **Core coverage gate**: the pure-logic core — `rank`, `intent`, `config` — must
+  hold **≥ 90 %** statement coverage (`scripts/ci/coverage-gate.sh`, enforced in
+  the unit job and on pre-push). A core package with functions but no tests fails
+  the gate; a not-yet-built stub is skipped. Composition roots (`cmd/*`), the
+  logging leaf (`observ`), the transport (`api`), and the adapters
+  (`retrieve/postgres`, `ingest`) are **not** under the 90 % floor — they are
+  covered by the integration + e2e tiers, whose coverage lives in separate
+  profiles.
+
+```bash
+cd api && make test               # unit (no DB)
+make db-up && make db-reset        # local Postgres + migrations
+cd api && make test-integration    # integration tier
+cd api && make test-e2e            # e2e tier
+cd api && make cover-gate          # the core >=90% gate
+```
 
 ### Complexity
 - **Go**: `gocyclo` (≤ 12), `gocognit` (≤ 15), `funlen` (80 lines / 50 stmts), `nestif` (≤ 5), `cyclop` package average ≤ 8.
