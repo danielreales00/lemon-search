@@ -97,9 +97,3 @@ deps:
   cmd-ingest:
     mayDependOn: [domain, retrieve-postgres, config, observ]
     canUse: [pgx, pgxpool, yaml]
-
-# ------- common, repeated files exemptions -------
-commonComponents: []
-
-# ------- assertions: enforce mandatory components present -------
-exposedVendors: []
