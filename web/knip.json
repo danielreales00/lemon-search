@@ -1,3 +1,7 @@
 {
-  "$schema": "https://unpkg.com/knip@5/schema.json"
+  "$schema": "https://unpkg.com/knip@5/schema.json",
+  "entry": [
+    "app/**/{page,layout,template,loading,error,not-found,route}.{ts,tsx}",
+    "lib/api.contract.ts"
+  ]
 }
