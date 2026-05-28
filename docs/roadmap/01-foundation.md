@@ -34,8 +34,9 @@ without setup detours.
 - [ ] Ingestion CLI loads ≥ 22,000 rows from `businesses-2026-05-27.json`.
 - [ ] ≥ 95% of loaded rows have: non-null `category`, `archetype`, and
       `latitude`/`longitude`.
-- [ ] `is_claimed` and `friend_count` synthesized deterministically; re-running
-      ingestion produces identical values.
+- [ ] `friend_count` synthesized deterministically; re-running ingestion
+      produces identical values. `is_claimed` is carried from the source JSON
+      (real passthrough, default false), not synthesized.
 - [ ] Go API on Fly.io serves `GET /healthz` → 200; Next.js on Vercel serves
       `/` with the skeleton page.
 - [ ] CI green on `main`.
@@ -53,7 +54,7 @@ without setup detours.
 | Config loader | `api/internal/config/loader.go` | YAML → typed struct, validation, fail-fast errors |
 | Ingestion CLI | `api/cmd/ingest/main.go` + `api/internal/ingest/*` | Stream parser, taxonomy, synth, bulk loader |
 | Taxonomy map | `api/internal/ingest/taxonomy.go` | Raw → spec category + archetype assignment |
-| Synth seeds | `api/internal/ingest/synth.go` | `IsClaimed(id)`, `FriendCount(id)` |
+| Synth seeds | `api/internal/ingest/synth.go` | `FriendCount(id)` (deterministic); `is_claimed` is source passthrough, not synthesized |
 | API skeleton | `api/cmd/api/main.go` | `/healthz`, `/version`; reads `LEMON_DATABASE_URL` |
 | FE skeleton | `web/app/page.tsx` | Plain heading + tagline |
 | Fly config | `fly.toml` | API region `iad`, Postgres URL from secret |
@@ -78,7 +79,8 @@ without setup detours.
    - Taxonomy normalizer (dirty → spec; unmapped → `Other`).
    - Archetype assigner (1-of-6, centralized table).
    - Non-Miami filter (bounding box + manual blocklist).
-   - Synthesize `is_claimed` (~35%) and `friend_count` (3% have 1–5).
+   - Synthesize `friend_count` only (3% have 1–5); `is_claimed` is a real
+     passthrough from the source JSON (default false), not synthesized.
    - Bulk `pgx.CopyFrom`; upsert on `id` (idempotent).
 5. **API + FE skeletons + deploy**
    - Go API: `/healthz`, `/version`; structured logging.
@@ -97,7 +99,7 @@ without setup detours.
 |---|---|---|
 | JSON streaming parser | `internal/ingest/parser_test.go` | well-formed array, `}\n{` separator, escaped quotes, nested objects (depth > 5), empty array, single object, truncated file |
 | Taxonomy normalizer | `internal/ingest/taxonomy_test.go` | golden file of 100 raw→spec mappings; unknown → `Other`; every spec category maps to exactly one archetype |
-| Synth seeds | `internal/ingest/synth_test.go` | `IsClaimed(id)` deterministic across 1000 calls; ~35% rate over 10000 sampled IDs (±2%); ~3% have non-zero `friend_count` |
+| Synth seeds | `internal/ingest/synth_test.go` | `FriendCount(id)` deterministic across repeated calls; over 10000 sampled IDs ~3% have non-zero `friend_count`, all nonzero values in 1..5, mean of nonzero ≈ 3.0 |
 | Non-Miami filter | `internal/ingest/filter_test.go` | inside bbox → keep; outside → drop; null lat/lng → drop; bounded-test of Versailles, FR sample |
 | Config loader | `internal/config/loader_test.go` | valid YAML round-trip; missing required field → typed error; unknown archetype → typed error |
 
@@ -128,8 +130,9 @@ without setup detours.
 - `config.Ranking` struct is loadable from `config/ranking.yaml`. The struct
   exposes archetype weights and behavior flags; `signal_formulas` switches
   default to `literal`.
-- `businesses` table has all rows loaded, with `archetype`, `is_claimed`,
-  `friend_count`, all generated columns populated.
+- `businesses` table has all rows loaded, with `archetype` and `friend_count`
+  populated and all generated columns computed. `is_claimed` holds the real
+  source value (passthrough, default false), not a synthesized one.
 - `bench/queries.json` is committed (still with `__FILL__` placeholders);
   the runner exists.
 
