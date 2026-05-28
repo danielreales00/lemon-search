@@ -1,0 +1,57 @@
+package domain
+
+import (
+	"encoding/json"
+	"time"
+
+	"github.com/google/uuid"
+)
+
+// Archetype is the demand-shape bucket a business belongs to. It selects which
+// signal weights the ranker applies. Values match the businesses.archetype
+// CHECK constraint in 0001_initial_schema.sql exactly.
+type Archetype string
+
+// The six valid archetypes.
+const (
+	ArchetypeLowStakesFastNearby     Archetype = "low_stakes_fast_nearby"
+	ArchetypeMediumStakesOccasion    Archetype = "medium_stakes_occasion"
+	ArchetypeHighStakesOneTime       Archetype = "high_stakes_one_time"
+	ArchetypeExperiential            Archetype = "experiential"
+	ArchetypeRecurringService        Archetype = "recurring_service"
+	ArchetypeUtilityDistanceDominant Archetype = "utility_distance_dominant"
+)
+
+// Candidate is one retrieval result carrying the rich raw signals the ranker
+// composes into a score. Retrieval fills every field; the ranker reads them
+// and writes a separate Score. Pointer fields are nil when the source column
+// is null. See contract C2 (docs/roadmap/05-architectural-contracts.md).
+type Candidate struct {
+	ID                uuid.UUID
+	Name              string
+	Category          string
+	Subcategory       *string
+	Archetype         Archetype
+	Neighborhood      *string
+	DistanceKM        float64  // from user location; capped at 48.28
+	LemonScore        *float64 // 0..10
+	GoogleRating      *float64 // 0..5
+	GoogleReviewCount int
+	PriceRange        *string // '$' | '$$' | '$$$' | '$$$$'
+	PhotoCount        int
+	IsClaimed         bool
+	FriendCount       int
+	IsNew             bool
+	IsOpenNow         *bool           // nil if hours unknown
+	Hours             json.RawMessage // passthrough for FE display
+	TextScore         float64         // ts_rank_cd
+	NameTrigram       float64         // similarity(name, q)
+}
+
+// SearchOpts carries the per-request retrieval parameters. Now is injected so
+// is_open_now and bench runs are reproducible.
+type SearchOpts struct {
+	Lat, Lng float64
+	Limit    int
+	Now      time.Time
+}
