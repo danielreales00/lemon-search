@@ -38,9 +38,12 @@ const searchSQL = `
 	from search_candidates($1, $2, $3, $4, $5, null, null, null, null, false)`
 
 // exactNameSQL is the separate exact-name path: 0–1 rows, ordered by name
-// similarity. It computes the same raw fields as search_candidates but has no
-// user location (the pin ignores distance), so distance_km is the ∞ sentinel
-// and open-status is evaluated against wall-clock now() for display only.
+// similarity. It pins ONLY on high trigram similarity (no bare ILIKE prefix),
+// so generic category words ("coffee", "sushi") can't hijack the pin —
+// prefix/partial recall is search_candidates' job (ranked, not pinned). See
+// docs/ranking/semantics.md §"Exact-name pin". It carries no user location
+// (the pin ignores distance), so distance_km is the ∞ sentinel and open-status
+// uses wall-clock now() for display only.
 const exactNameSQL = `
 	select
 		b.id, b.name, b.category, b.subcategory, b.archetype, b.neighborhood,
@@ -58,7 +61,7 @@ const exactNameSQL = `
 	from businesses b
 	cross join lateral lemon_open_status(
 		b.hours, (now() at time zone 'America/New_York')::timestamp) os
-	where similarity(b.name, $1) >= $2 or b.name ilike $1 || '%'
+	where similarity(b.name, $1) >= $2
 	order by similarity(b.name, $1) desc, b.id
 	limit 1`
 
@@ -106,8 +109,8 @@ func (r *Repo) Search(ctx context.Context, q string, opts domain.SearchOpts) ([]
 }
 
 // ExactName returns at most one candidate whose name matches q at or above the
-// 0.85 similarity threshold (or as a prefix). found=false (with a nil error)
-// means no pin — not an error.
+// 0.85 trigram similarity threshold. found=false (with a nil error) means no
+// pin — not an error.
 func (r *Repo) ExactName(ctx context.Context, q string) (c domain.Candidate, found bool, err error) {
 	ctx, cancel := context.WithTimeout(ctx, queryTO)
 	defer cancel()

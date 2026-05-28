@@ -167,6 +167,26 @@ func TestExactNameMissReturnsNotFound(t *testing.T) {
 	}
 }
 
+// TestExactNameBarePrefixDoesNotPin guards the realignment: "ZZFIXTURE" is a
+// bare prefix shared by every seeded row (the analog of a category word like
+// "coffee" matching "Coffee To Go"). With the ILIKE prefix clause removed, a
+// low-similarity prefix must NOT pin — prefix recall is search_candidates' job.
+func TestExactNameBarePrefixDoesNotPin(t *testing.T) {
+	pool, ctx := setup(t)
+
+	repo, err := New(pool)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	_, found, err := repo.ExactName(ctx, "ZZFIXTURE")
+	if err != nil {
+		t.Fatalf("ExactName: %v", err)
+	}
+	if found {
+		t.Errorf("bare prefix %q pinned a result; the over-fire should be fixed", "ZZFIXTURE")
+	}
+}
+
 func TestSearchDistanceNearVsFar(t *testing.T) {
 	pool, ctx := setup(t)
 
