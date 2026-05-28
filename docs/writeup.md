@@ -19,9 +19,17 @@ _One paragraph: what shipped, p95 latency, bench pass rate, biggest call._
 ## Search engine
 
 - Choice: Postgres `pg_trgm` + weighted `tsvector` + GIN on tag arrays +
-  `earthdistance`.
+  `earthdistance`, with a coverage + per-word-levenshtein exact-name matcher.
 - Alternatives considered: Algolia, Meilisearch, Typesense. Why Postgres
   won at 23k rows: see [adr/0002-search-engine.md](adr/0002-search-engine.md).
+- **Measured head-to-head, not asserted** (726 generated cases, identical set,
+  same ranker + pin logic): Postgres coverage+levenshtein **86%** overall vs
+  Meilisearch v1.11 **80%** vs trigram baseline 76%. Postgres *beat the engine
+  on typo tolerance* (97% vs 77% — our per-word edit budget exceeds Meili's
+  defaults), the engine's hoped-for partial-query edge didn't materialize
+  (39% vs 37%), and it would add a second system + sync + a network hop. Full
+  table + caveats in ADR-0002. Meili stays a documented escape hatch behind the
+  `BusinessRepo` port.
 
 ## Schema
 

@@ -113,7 +113,8 @@ deps:
     mayDependOn: [domain, ingest, retrieve-postgres, config, observ]
     canUse: [pgx, pgxpool, yaml]
 
-  # cmd-bench-runner: in-process bench harness; wires repo + ranker like cmd-api
+  # cmd-bench-runner: in-process bench harness; wires repo + ranker like cmd-api.
+  # Talks to Meilisearch over its REST API (net/http) for the engine A/B.
   cmd-bench-runner:
     mayDependOn: [domain, config, rank, retrieve-postgres]
-    canUse: [pgx, pgxpool]
+    canUse: [pgx, pgxpool, net-http]

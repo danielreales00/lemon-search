@@ -67,6 +67,45 @@ ranker if `pg_trgm` proves weak on the bench. Day-3 escape hatch only.
   add a `retrieve/meilisearch` adapter, sync from Postgres, and run a
   shadow A/B before committing.
 
+## Validation — measured 3-way comparison (2026-05-28)
+
+We did exactly the shadow A/B above before committing the matcher. Benchmark:
+726 cases generated from 300 real businesses (sampled by `md5(id)`; per-word
+typos, accent-stripped, and 3-token partials, all with automatic ground truth),
+identical cases across engines, **same ranker + same pin coverage logic** — only
+the retrieval engine differs (`scripts`: `cmd/bench-runner -generate`).
+
+| dimension | Postgres trgm 0.85 | Postgres coverage+levenshtein | Meilisearch v1.11 (defaults) |
+|---|---|---|---|
+| exact     | 100% | 100%     | 100% |
+| typo      | 69%  | **97%**  | 77%  |
+| accent    | 67%  | **100%** | 83%  |
+| over_fire | 88%  | 76%      | **100%** |
+| partial   | 37%  | 37%      | 39%  |
+| **overall** | 76% | **86%** | 80%  |
+| search p95 (local) | ~105ms | ~40ms | ~11ms |
+
+- **Postgres coverage+levenshtein beats Meili on typo tolerance (97% vs 77%)** —
+  per-word edit budget (≤4 chars, the spec's model) exceeds Meili's defaults
+  (≤2/word). The purpose-built engine did not win the graded core out of the box.
+- **Meili avoids the over-fire (100%)** by ranking instead of hard-pinning; our
+  coverage pin still over-fires on bare single-token category words (76%) —
+  fixable in Postgres via taxonomy suppression (Stage-3 intent), tracked separately.
+- **The engine's hoped-for win — partials — did not materialize** (39% vs 37%);
+  a short prefix of a long name is inherently ambiguous for all three.
+- Meili's raw search is faster, but a second system adds a hop, a sync pipeline,
+  and a second source of truth — against the one-system Supabase deliverable.
+
+**Decision stands: Postgres** (coverage+levenshtein). It wins overall and on the
+graded core (typo), single system. Meili tuning could close the typo gap but
+adds operational cost for no overall gain; the `retrieve/meilisearch` adapter
+remains a documented escape hatch behind the `BusinessRepo` port for a future
+need (multilingual, semantic) that the data does not show today.
+
+Caveats: Meili ran with default typo/ranking settings; the bench Meili adapter
+simplified open-status and used rune-levenshtein for the pin. Neither materially
+affects name-match pass@3.
+
 ## Cross-references
 
 - Index spec: [../data/schema.md](../data/schema.md#indexes)

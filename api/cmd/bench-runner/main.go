@@ -87,6 +87,10 @@ type opts struct {
 	label     string
 	generate  int
 	seed      int64
+	engine    string
+	index     bool
+	meiliURL  string
+	meiliKey  string
 }
 
 func main() {
@@ -96,6 +100,10 @@ func main() {
 	flag.StringVar(&o.label, "label", "run", "label shown in the report")
 	flag.IntVar(&o.generate, "generate", 0, "if >0, generate this many sampled businesses' query variants")
 	flag.Int64Var(&o.seed, "seed", 42, "RNG seed for generated typos (fixed => reproducible)")
+	flag.StringVar(&o.engine, "engine", "postgres", "retrieval engine: postgres | meili")
+	flag.BoolVar(&o.index, "index", false, "index businesses into Meili, then exit")
+	flag.StringVar(&o.meiliURL, "meili-url", "http://localhost:7700", "Meilisearch base URL")
+	flag.StringVar(&o.meiliKey, "meili-key", "lemonbenchkey", "Meilisearch master key")
 	flag.Parse()
 
 	if err := run(o); err != nil {
@@ -105,10 +113,6 @@ func main() {
 }
 
 func run(o opts) error {
-	cfg, err := config.LoadFile(o.cfgPath)
-	if err != nil {
-		return fmt.Errorf("loading config: %w", err)
-	}
 	ctx := context.Background()
 	url := os.Getenv("LEMON_DATABASE_URL")
 	if url == "" {
@@ -119,11 +123,24 @@ func run(o opts) error {
 		return fmt.Errorf("connecting to %s: %w", url, err)
 	}
 	defer pool.Close()
-	repo, err := pgrepo.New(pool)
-	if err != nil {
-		return fmt.Errorf("building repo: %w", err)
+
+	if o.index {
+		n, err := indexBusinesses(ctx, pool, newMeiliClient(o.meiliURL, o.meiliKey))
+		if err != nil {
+			return err
+		}
+		fmt.Printf("indexed %d businesses into Meili (%s)\n", n, o.meiliURL)
+		return nil
 	}
 
+	cfg, err := config.LoadFile(o.cfgPath)
+	if err != nil {
+		return fmt.Errorf("loading config: %w", err)
+	}
+	repo, err := buildRepo(o, pool)
+	if err != nil {
+		return err
+	}
 	bf, err := buildBench(ctx, pool, o)
 	if err != nil {
 		return err
@@ -139,6 +156,17 @@ func run(o opts) error {
 	}
 	report(o.label, len(bf.Tests), results)
 	return nil
+}
+
+func buildRepo(o opts, pool *pgxpool.Pool) (domain.BusinessRepo, error) {
+	if o.engine == "meili" {
+		return meiliRepo{c: newMeiliClient(o.meiliURL, o.meiliKey)}, nil
+	}
+	r, err := pgrepo.New(pool)
+	if err != nil {
+		return nil, fmt.Errorf("building repo: %w", err)
+	}
+	return r, nil
 }
 
 func buildBench(ctx context.Context, pool *pgxpool.Pool, o opts) (benchFile, error) {
