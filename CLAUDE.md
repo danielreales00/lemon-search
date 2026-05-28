@@ -221,7 +221,9 @@ Run locally before pushing: `lefthook run pre-push --all-files`.
   `type(scope): subject` (lower-case subject, no trailing period, ≤100 chars).
   - types: `feat fix perf refactor docs test build ci chore style revert rank bench data`
   - scopes: `api web ingest schema config rank intent retrieve observ bench ci hooks docs deps repo`
-- **Do NOT sign commits.** No `Co-Authored-By`, no "Generated with" trailers.
+- **No Claude/AI attribution in commits** (no "Generated with Claude Code"). The
+  Orca CLI auto-appends its own `Co-authored-by: Orca` trailer — that's
+  intentional; leave it in.
 - One logical change per PR. Link the board item + stage doc. Use the PR
   template's spec-faithfulness checklist.
 - Never force-push `main`. Never merge red CI.
@@ -237,8 +239,11 @@ go run ./cmd/ingest -input ../businesses-2026-05-27.json
 # Web
 cd web && npm run dev | build | lint | typecheck | knip | madge
 
-# DB
-psql "$LEMON_DATABASE_URL" -f supabase/migrations/0001_initial_schema.sql
+# DB — local dev (Supabase Postgres in Docker; no cloud needed). See docs/operations/local-dev.md
+make db-up                   # start local Postgres on :54322 (supabase start)
+make db-reset                # apply supabase/migrations/* (extensions, tables, indexes, role)
+make db-ingest               # load businesses JSON into the local DB (needs cmd/ingest — #20)
+psql "$LEMON_DATABASE_URL" -f supabase/migrations/0001_initial_schema.sql   # direct apply
 
 # Bench
 go run ./scripts/bench-runner            # writes bench/results-<date>.json
