@@ -7,8 +7,10 @@ material; the writeup at the end (`writeup.md`) draws from it.
 
 | Doc | What's in it |
 |---|---|
+| [../CLAUDE.md](../CLAUDE.md) | Always-loaded agent context: stack, boundaries, working model, conventions. Read first. |
 | [architecture.md](architecture.md) | The patterns we adopted and why, with the topology diagram. |
 | [development.md](development.md) | Local setup, quality stack, hooks, conventions. |
+| [operations/workflow.md](operations/workflow.md) | How we chunk work and run parallel agents in worktrees. |
 | [glossary.md](glossary.md) | Terms used across the docs. |
 | [writeup.md](writeup.md) | Stage 4 deliverable — drafted on Day 4. |
 
@@ -44,6 +46,8 @@ material; the writeup at the end (`writeup.md`) draws from it.
 
 | Doc | Purpose |
 |---|---|
+| [operations/workflow.md](operations/workflow.md) | Chunked work, worktrees, the project board, parallel agents. |
+| [operations/feature-flags.md](operations/feature-flags.md) | Flag conventions + registry (keep `main` deployable). |
 | [operations/deployment.md](operations/deployment.md) | Runbook: Supabase, Fly.io, Vercel — setup, deploy, rollback. |
 | [operations/observability.md](operations/observability.md) | Logging, per-stage timing, performance budget. |
 
