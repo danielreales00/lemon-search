@@ -1,0 +1,14 @@
+{
+  // Rules live in .markdownlint.json (read automatically). This file only
+  // carries the ignore list, which markdownlint-cli2 honors regardless of the
+  // globs passed on the CLI.
+  "ignores": [
+    "node_modules",
+    "web/node_modules",
+    ".next",
+    "out",
+    "dist",
+    // Provided spec — kept verbatim, not ours to restyle.
+    "Lemon_4_Day Build Trial.md"
+  ]
+}

@@ -29,7 +29,7 @@ jobs:
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: true
-          cache-dependency-path: api/go.sum
+          cache-dependency-path: api/go.mod
       - name: gofumpt
         run: |
           go install mvdan.cc/gofumpt@latest
@@ -56,7 +56,7 @@ jobs:
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: true
-          cache-dependency-path: api/go.sum
+          cache-dependency-path: api/go.mod
       - name: Install go-arch-lint
         run: go install github.com/fe3dback/go-arch-lint@latest
       - name: Check
@@ -86,7 +86,7 @@ jobs:
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: true
-          cache-dependency-path: api/go.sum
+          cache-dependency-path: api/go.mod
       - name: Install extensions and apply migrations
         run: |
           PGPASSWORD=postgres psql -h localhost -U postgres -d lemon_test \
@@ -117,7 +117,7 @@ jobs:
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: true
-          cache-dependency-path: api/go.sum
+          cache-dependency-path: api/go.mod
       - name: Build binaries
         working-directory: api
         run: |

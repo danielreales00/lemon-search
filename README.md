@@ -9,7 +9,7 @@
 Typo-tolerant, ranked search over Lemon's Miami business catalog.
 Sub-100ms p95, 7-signal ranking with archetype-aware weights, lexicon-driven semantic intent.
 
-[Live demo](#) · [Docs index](docs/README.md) · [Writeup](docs/writeup.md) · [Architecture](docs/architecture.md) · [Roadmap](docs/roadmap/00-overview.md) · [API](docs/api.md) · [Development](docs/development.md)
+**Live demo** _(Stage 4)_ · [Docs index](docs/README.md) · [Writeup](docs/writeup.md) · [Architecture](docs/architecture.md) · [Roadmap](docs/roadmap/00-overview.md) · [API](docs/api.md) · [Development](docs/development.md)
 
 [![CI](https://github.com/danielreales00/lemon-search/actions/workflows/ci.yml/badge.svg)](https://github.com/danielreales00/lemon-search/actions/workflows/ci.yml)
 [![Go](https://img.shields.io/badge/Go-1.23-00ADD8?logo=go&logoColor=white)](api/go.mod)
