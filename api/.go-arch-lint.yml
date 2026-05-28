@@ -43,6 +43,8 @@ components:
     in: internal/config/**
   observ:
     in: internal/observ/**
+  ingest:
+    in: internal/ingest/**
   retrieve-postgres:
     in: internal/retrieve/postgres/**
   cmd-api:
@@ -82,6 +84,12 @@ deps:
   rank:
     mayDependOn: [domain, config]
     anyVendorDeps: false
+
+  # ingest: ingestion pipeline. The stream parser itself imports only stdlib;
+  # later ingest stages compose domain shapes, config, logging, and the loader.
+  ingest:
+    mayDependOn: [domain, config, observ]
+    canUse: [pgx, pgxpool, yaml]
 
   # retrieve-postgres: DB adapter; sees domain only
   retrieve-postgres:
