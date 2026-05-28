@@ -70,7 +70,7 @@ Search request flow:
 - **Pure core.** `rank` and `intent` do zero I/O. Same input → same output.
   That's what makes them testable against fixtures without a DB.
 - **Index-time over query-time.** Precompute anything you can at ingest
-  (generated columns `photo_count`, `is_new`, `search_vector`; `loc` set in the
+  (generated columns `photo_count`, `is_new`; `loc` + `search_vector` set in the
   ingest INSERT; archetype assignment; taxonomy normalization). The hot path
   stays thin.
 - **Config over code for anything tunable.** Archetype weights, formula

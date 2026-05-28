@@ -51,41 +51,37 @@ components:
     in: cmd/ingest/**
 
 # ------- import rules -------
+# `mayDependOn` is an allowlist: anything not listed is forbidden. (There is no
+# `cannotDependOn` in go-arch-lint — the allowlist already implies it.)
 deps:
   # domain is pure
   domain:
     mayDependOn: []
-    cannotDependOn: [api, intent, rank, config, observ, retrieve-postgres]
     anyVendorDeps: false   # not even vendor packages
 
   # observ is a leaf utility (used by everyone above)
   observ:
     mayDependOn: []
-    cannotDependOn: [api, intent, rank, config, retrieve-postgres, domain]
 
   # config can only see domain (loads typed config into domain shapes)
   config:
     mayDependOn: [domain]
     canUse: [yaml]
-    cannotDependOn: [api, intent, rank, retrieve-postgres, observ]
 
   # intent: lexicon → overlay; only domain types
   intent:
     mayDependOn: [domain]
-    cannotDependOn: [api, rank, retrieve-postgres, config]
     anyVendorDeps: false
 
   # rank: pure scoring; sees domain types + config
   rank:
     mayDependOn: [domain, config]
-    cannotDependOn: [api, retrieve-postgres, intent]
     anyVendorDeps: false
 
   # retrieve-postgres: DB adapter; sees domain only
   retrieve-postgres:
     mayDependOn: [domain]
     canUse: [pgx, pgxpool]
-    cannotDependOn: [api, rank, intent, config]
 
   # api: HTTP transport; composes everything except cmd
   api:

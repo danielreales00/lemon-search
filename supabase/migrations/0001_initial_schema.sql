@@ -54,15 +54,18 @@ create table if not exists businesses (
   is_new               boolean generated always as (
                          coalesce(google_review_count, 0) < 10
                        ) stored,
-  search_vector        tsvector generated always as (
-                         setweight(to_tsvector('english', coalesce(name, '')), 'A')
-                         || setweight(to_tsvector('english', coalesce(subcategory, '')), 'B')
-                         || setweight(to_tsvector('english', coalesce(category, '')), 'C')
-                         || setweight(to_tsvector('english', coalesce(specialty, '')), 'C')
-                         || setweight(to_tsvector('english',
-                              array_to_string(coalesce(specific_tags, '{}'), ' ')), 'C')
-                         || setweight(to_tsvector('english', coalesce(about, '')), 'D')
-                       ) stored,
+  -- `search_vector` is populated at ingest (and on re-ingest) via the weighted
+  -- to_tsvector expression below — see docs/data/ingestion.md. Not a STORED
+  -- generated column: to_tsvector with a text-literal config isn't immutable
+  -- enough for a generation expression on PG15, but it's fine in an INSERT.
+  --   setweight(to_tsvector('english', coalesce(name,'')),       'A')
+  --   || setweight(to_tsvector('english', coalesce(subcategory,'')), 'B')
+  --   || setweight(to_tsvector('english', coalesce(category,'')),    'C')
+  --   || setweight(to_tsvector('english', coalesce(specialty,'')),   'C')
+  --   || setweight(to_tsvector('english',
+  --        array_to_string(coalesce(specific_tags,'{}'), ' ')),      'C')
+  --   || setweight(to_tsvector('english', coalesce(about,'')),       'D')
+  search_vector        tsvector,
   created_at           timestamptz not null default now()
 );
 
