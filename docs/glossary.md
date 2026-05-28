@@ -117,7 +117,8 @@ Single-binary git hook runner. Replaces husky/pre-commit. Config:
 
 ### lemon_seed(id)
 Postgres function returning a stable `[0, 1)` value from a UUID. Used to make
-`is_claimed` and `friend_count` synthesis deterministic across re-ingests.
+`friend_count` synthesis deterministic across re-ingests. No longer used for
+`is_claimed`, which is kept as real source data (not synthesized).
 
 ### Madge
 Node.js tool that finds circular dependencies. Runs on pre-commit and CI.
