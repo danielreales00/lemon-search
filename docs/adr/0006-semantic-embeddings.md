@@ -39,9 +39,12 @@ Add a semantic recall channel:
    so semantic candidates join the set the 7-signal ranker scores. Gated by
    `LEMON_FF_SEMANTIC` (default **off**); a zero/absent query vector is a no-op,
    so today's behavior is unchanged when the flag is off.
-4. **Stays spec-faithful**: semantic improves **recall**. A `semantic_relevance`
-   *ranking* signal (vector score in the linear sum) would be a further opt-in
-   `signal_formulas` switch (ADR-0004 discipline), not part of V1.
+4. **Stays spec-faithful — relevance stays in recall.** A `semantic_relevance`
+   *ranking* signal is **explicitly rejected**: it would add an 8th signal to the
+   spec's fixed 7-signal × archetype sum — a structural change to the ranking
+   contract, not a formula swap for an existing signal (unlike bayesian/decay).
+   The spec's only sanctioned ranking-level relevance override is the exact-name
+   pin. So semantic improves *retrieval*; the 7-signal ranker is untouched.
 
 ### Model + runtime
 
@@ -91,13 +94,13 @@ Add a semantic recall channel:
 
 ## Rollout (board chunks)
 
-- **E1** `pgvector` extension + `embedding vector(384)` column + HNSW index (migration) + schema doc.
-- **E2** `domain.Embedder` port + Ollama adapter (`retrieve/embed/ollama`), flag-gated.
-- **E3** ingest embedding pass — compute + store business embeddings.
-- **E4** query-embed in `search.Service` + vector recall blend in `search_candidates`, behind `LEMON_FF_SEMANTIC`.
-- **E5** semantic bench (NL query set → expected businesses) + **latency measurement** (p50/p95 with vs without).
-- **E6** (opt) in-process ONNX adapter for production, behind the same port.
-- **E7** (opt) `semantic_relevance` ranking signal behind a `signal_formulas` switch.
+- **E1** (#89) `pgvector` extension + `embedding vector(384)` column + HNSW index (migration) + schema doc.
+- **E2** (#90) `domain.Embedder` port + Ollama adapter (`retrieve/embed/ollama`), flag-gated.
+- **E3** (#91) ingest embedding pass — compute + store business embeddings.
+- **E4** (#92) query-embed in `search.Service` + vector recall blend in `search_candidates`, behind `LEMON_FF_SEMANTIC`.
+- **E5** (#93) semantic bench (NL query set → expected businesses) + **latency measurement** (p50/p95 with vs without) — the go/no-go gate.
+- **E6** (#95) in-process ONNX adapter for production, behind the same port — pursue only if E5 clears the gate.
+- ~~**E7** `semantic_relevance` ranking signal~~ — **rejected as counter-spec** (Decision §4): it would add an 8th ranking signal. Relevance stays in retrieval.
 
 ## Cross-references
 
