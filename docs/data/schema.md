@@ -105,6 +105,12 @@ Valid `archetype` values:
 | `specific_tags` (joined to text) | C |
 | `about` | D |
 
+### Semantic recall
+
+| Column | Type | Null? | Source | Notes |
+|---|---|---|---|---|
+| `embedding` | `vector(384)` | yes | Computed at ingest from `name + category + subcategory + tags + about` via the `all-MiniLM-L6-v2` model (#91) | pgvector (extension `vector`). Indexed HNSW with `vector_cosine_ops` (cosine `<=>`). **Stays NULL until the ingest embedding pass (#91) backfills it**; a NULL embedding is a harmless no-op for the recall blend (#92), never an error. Added in `0006_pgvector_embedding.sql`. See [adr/0006-semantic-embeddings.md](../adr/0006-semantic-embeddings.md). |
+
 ## Indexes
 
 | Index | Columns | Method | Purpose |
@@ -117,6 +123,7 @@ Valid `archetype` values:
 | `idx_biz_archetype` | `archetype` | btree | Optional filter / observability |
 | `idx_biz_uni_tags` | `universal_tags` | GIN | `@>` / `&&` for intent tags |
 | `idx_biz_spec_tags` | `specific_tags` | GIN | Same |
+| `idx_biz_embedding` | `embedding vector_cosine_ops` | HNSW (`m=16, ef_construction=64`) | Semantic ANN recall (cosine `<=>`); fills as #91 writes embeddings |
 
 ## Functions
 
