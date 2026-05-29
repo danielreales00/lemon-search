@@ -244,6 +244,54 @@ The `created_at` of pre-existing rows is preserved; everything else is
 refreshed. `friend_count` stays stable because of the deterministic seed;
 `is_claimed` is whatever the source JSON says (a passthrough, not synthesized).
 
+## Embedding pass (semantic recall)
+
+A separate mode of the same CLI backfills the `embedding vector(384)` column
+for semantic recall (ADR-0006, E3). It is decoupled from the JSON load: the load
+writes the text columns; this pass reads them back, embeds, and writes the
+vector — so it can run (and re-run) independently and needs no input file.
+
+```bash
+go run ./cmd/ingest -embed                 # backfill every NULL embedding
+go run ./cmd/ingest -embed -embed-all      # re-embed every row (overwrite)
+go run ./cmd/ingest -embed -embed-limit N  # bounded sample run (first N rows)
+```
+
+- **Embed text** (`ingest.EmbedText`, pure): `name`, `category`, `subcategory`,
+  `universal_tags`, `specific_tags`, `about`, joined **newline-separated** in
+  that descending-salience order (identifying signal first, free-text `about`
+  last). Tags are space-joined within their line; empty/blank fields are skipped
+  (no stray separators); a row with no text at all is left NULL and never sent to
+  the model. The result is truncated to **1000 runes** (rune-boundary safe):
+  `all-MiniLM-L6-v2` caps at 256 word-pieces and Ollama's `/api/embed` 400s the
+  whole batch if any input exceeds the context length (~1100–1200 chars here);
+  1000 keeps the full text for ~98.5% of rows (p99 ≈ 1087) and only ever drops
+  the tail of a long `about`.
+- **Batching**: rows are keyset-paginated by `id` (deterministic, bounded
+  memory) in pages of 64; each page is one `Embedder.EmbedBatch` call, then one
+  batched `UPDATE … SET embedding = $1::vector WHERE id = $2` per row, committed
+  per page in a transaction (atomic per page).
+- **pgvector encoding**: pgx has no native pgvector codec, so the `[]float32` is
+  formatted as the pgvector text literal `'[0.1,0.2,…]'` and bound with an
+  explicit `$1::vector` cast — zero new dependencies (no `pgvector-go`).
+- **Idempotent**: the default skips rows that already have an embedding
+  (`-embed-all` overwrites). Re-running fills only what's missing.
+- **Runtime**: the `domain.Embedder` port, wired in `cmd/ingest` to the Ollama
+  adapter (`LEMON_OLLAMA_URL`, default `http://localhost:11434`;
+  `LEMON_OLLAMA_MODEL`, default `all-minilm`). The pass depends on the port, not
+  the adapter. Throughput is ~18 ms/row locally (CPU Ollama) → a one-off
+  ~6–7 min pass over the full ~22.5k rows.
+
+End-of-pass report (stdout):
+
+```
+embedding pass done in 3.5s
+  scanned:      200
+  embedded:     200
+  skipped:        0 (no embeddable text)
+  throughput: 17.6 ms/row
+```
+
 ## Cross-references
 
 - The malformed-JSON gotcha is also captured in the memory store as a
@@ -252,3 +300,5 @@ refreshed. `friend_count` stays stable because of the deterministic seed;
 - Taxonomy: [taxonomy.md](taxonomy.md)
 - Quality findings: [quality.md](quality.md)
 - Implementation: `api/cmd/ingest/main.go` + `api/internal/ingest/`
+  (embedding pass: `api/cmd/ingest/embed.go` + `api/internal/ingest/embed*.go`)
+- Semantic embeddings decision: [adr/0006-semantic-embeddings.md](../adr/0006-semantic-embeddings.md)

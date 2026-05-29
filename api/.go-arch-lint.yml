@@ -136,10 +136,12 @@ deps:
     mayDependOn: [domain, api, search, intent, rank, config, observ, flags, retrieve-postgres]
     canUse: [net-http, pgx, pgxpool, yaml]
 
-  # cmd-ingest: ingestion CLI; no HTTP needed
+  # cmd-ingest: ingestion CLI. Also the composition root for the embedding pass
+  # (ADR-0006, E3): it constructs the Ollama embedder adapter (embed-ollama,
+  # localhost HTTP) and wires it into the ingest backfiller via the domain port.
   cmd-ingest:
-    mayDependOn: [domain, ingest, retrieve-postgres, config, observ]
-    canUse: [pgx, pgxpool, yaml]
+    mayDependOn: [domain, ingest, retrieve-postgres, embed-ollama, config, observ]
+    canUse: [pgx, pgxpool, yaml, net-http]
 
   # cmd-bench-runner: in-process bench harness; wires repo + config into the
   # search service (intent ON) so the bench measures the feature-ON path. Talks

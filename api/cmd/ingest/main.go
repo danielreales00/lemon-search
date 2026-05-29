@@ -5,9 +5,15 @@
 // geo filter → taxonomy → synth) into the COPY-stream loader. The pipeline is
 // idempotent: re-running on the same input yields the same final table state.
 //
-// Usage:
+// It has two modes:
 //
-//	LEMON_DATABASE_URL=postgres://… go run ./cmd/ingest -input businesses-2026-05-27.json
+//	go run ./cmd/ingest -input businesses-2026-05-27.json   # load JSON → DB
+//	go run ./cmd/ingest -embed                              # backfill embeddings
+//
+// The -embed pass (ADR-0006, E3) computes a sentence embedding per business from
+// its text and writes the businesses.embedding vector(384) column via the
+// domain.Embedder port (Ollama adapter). It is idempotent: by default it only
+// fills rows whose embedding is still NULL.
 package main
 
 import (
@@ -37,13 +43,22 @@ const statementTO = "300000" // ms (5 min); batch ingest, not the API's 1s
 func main() {
 	logger := observ.New(os.Getenv("LEMON_LOG_LEVEL"))
 
-	input := flag.String("input", "", "path to businesses-*.json")
+	input := flag.String("input", "", "path to businesses-*.json (load mode)")
+	embed := flag.Bool("embed", false, "backfill business embeddings instead of loading JSON")
+	embedAll := flag.Bool("embed-all", false, "with -embed: re-embed every row, not just NULL embeddings")
+	embedLimit := flag.Int("embed-limit", 0, "with -embed: cap rows processed (0 = all; use for a sample run)")
 	flag.Parse()
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	if err := run(ctx, logger, *input); err != nil {
+	var err error
+	if *embed {
+		err = runEmbed(ctx, logger, embedOpts{all: *embedAll, limit: *embedLimit})
+	} else {
+		err = run(ctx, logger, *input)
+	}
+	if err != nil {
 		logger.Error("fatal", slog.String("err", err.Error()))
 		os.Exit(1)
 	}
