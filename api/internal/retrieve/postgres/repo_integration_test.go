@@ -103,15 +103,17 @@ func TestSearchSurfacesSeededSushi(t *testing.T) {
 		t.Errorf("search %q missing seeded sushi rows; got %v", "ZZFIXTURE sushi", keys(names))
 	}
 	// Recall is intentionally inclusive (the barber shares the "ZZFIXTURE"
-	// trigram), so the barber may appear — but the "sushi" lexeme must give the
-	// sushi rows a higher text_score than the non-sushi barber.
-	byName := candidateByName(got)
-	barber, ok := byName["ZZFIXTURE Closed Barber"]
-	if ok {
+	// trigram), so the barber may appear — but the "sushi" lexeme must rank the
+	// sushi rows ahead of the non-sushi barber in the recall order.
+	pos := make(map[string]int, len(got))
+	for i := range got {
+		pos[got[i].Name] = i
+	}
+	if barberPos, ok := pos["ZZFIXTURE Closed Barber"]; ok {
 		for _, n := range []string{"ZZFIXTURE Sushi Near", "ZZFIXTURE Sushi Far"} {
-			if sushi := byName[n]; sushi.TextScore <= barber.TextScore {
-				t.Errorf("%s text_score %.3f should beat barber %.3f for a sushi query",
-					n, sushi.TextScore, barber.TextScore)
+			if sp, found := pos[n]; found && sp >= barberPos {
+				t.Errorf("%s at recall position %d should rank ahead of the barber (%d) for a sushi query",
+					n, sp, barberPos)
 			}
 		}
 	}
@@ -123,8 +125,7 @@ func TestSearchNonsenseReturnsNoFixtures(t *testing.T) {
 	got := mustSearch(ctx, t, pool, "zzfixture-qwopzxnonsense")
 	for _, c := range got {
 		if isFixture(c.Name) {
-			t.Errorf("nonsense query surfaced fixture %q (text=%v trgm=%v)",
-				c.Name, c.TextScore, c.NameTrigram)
+			t.Errorf("nonsense query surfaced fixture %q", c.Name)
 		}
 	}
 }

@@ -46,8 +46,6 @@ type Candidate struct {
 	IsOpenNow         *bool           // nil if hours unknown; false = closed at opts.Now
 	OpensLater        bool            // closed now but reopens before midnight → 0.3 open-status
 	Hours             json.RawMessage // passthrough for FE display
-	TextScore         float64         // ts_rank_cd
-	NameTrigram       float64         // similarity(name, q)
 }
 
 // SearchOpts carries the per-request retrieval parameters. Now is injected so
