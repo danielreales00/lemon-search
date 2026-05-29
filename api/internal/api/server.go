@@ -6,8 +6,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/danielreales00/lemon-search/api/internal/config"
-	"github.com/danielreales00/lemon-search/api/internal/domain"
+	"github.com/danielreales00/lemon-search/api/internal/search"
 )
 
 // readyTimeout bounds the DB ping behind /readyz so a stalled database never
@@ -30,23 +29,22 @@ type BuildInfo struct {
 	Date    string
 }
 
-// Server holds the HTTP dependencies and exposes the routed handler.
+// Server holds the HTTP dependencies and exposes the routed handler. It is thin
+// transport: the search use-case lives in svc; this layer only parses requests,
+// calls the service, and encodes the response.
 type Server struct {
-	log           *slog.Logger
-	pinger        Pinger
-	repo          domain.BusinessRepo
-	cfg           *config.Ranking
-	build         BuildInfo
-	intentEnabled bool
+	log    *slog.Logger
+	pinger Pinger
+	svc    *search.Service
+	build  BuildInfo
 }
 
 // New wires the HTTP server dependencies. It accepts interfaces and returns a
-// concrete *Server; callers obtain the routed handler via Handler. repo and cfg
-// may be nil — /search then reports 503, while the health endpoints still work.
-// intentEnabled gates the intent extractor (LEMON_FF_INTENT); when false the
-// search path behaves exactly as it did before the extractor was wired in.
-func New(log *slog.Logger, pinger Pinger, repo domain.BusinessRepo, cfg *config.Ranking, build BuildInfo, intentEnabled bool) *Server {
-	return &Server{log: log, pinger: pinger, repo: repo, cfg: cfg, build: build, intentEnabled: intentEnabled}
+// concrete *Server; callers obtain the routed handler via Handler. svc may be
+// nil — /search then reports 503, while the health endpoints still work (a
+// server booted without a DB or ranking config has no usable search service).
+func New(log *slog.Logger, pinger Pinger, svc *search.Service, build BuildInfo) *Server {
+	return &Server{log: log, pinger: pinger, svc: svc, build: build}
 }
 
 // Handler returns the fully routed http.Handler with request logging applied.

@@ -1,7 +1,6 @@
 package api
 
 import (
-	"context"
 	"fmt"
 	"math"
 	"net/http"
@@ -11,15 +10,13 @@ import (
 	"time"
 
 	"github.com/danielreales00/lemon-search/api/internal/domain"
-	"github.com/danielreales00/lemon-search/api/internal/intent"
 	"github.com/danielreales00/lemon-search/api/internal/rank"
 )
 
 const (
-	// candidateLimit caps the recall set retrieval returns; the ranker trims it
-	// down to resultLimit after scoring.
-	candidateLimit = 150
-	resultLimit    = 15
+	// resultCap pre-sizes the response slice; the service caps the returned
+	// results to the same top-N (the limit policy lives there, not here).
+	resultCap = 15
 
 	// Fixed Miami fallback used when the client sends no location (downtown).
 	defaultLat = 25.7617
@@ -59,11 +56,12 @@ type searchTimings struct {
 	TotalMS  int64 `json:"total_ms"`
 }
 
-// handleSearch runs intent (flag-gated) → retrieval → re-rank and encodes the
-// top results with per-stage timings.
+// handleSearch parses the request, delegates the search use-case to the
+// service, and encodes the top results with per-stage timings. The orchestration
+// (intent → retrieval → pin → re-rank) lives in search.Service.
 func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
-	if s.repo == nil || s.cfg == nil {
+	if s.svc == nil {
 		s.writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "search is not configured"})
 		return
 	}
@@ -81,7 +79,7 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp := searchResponse{Query: q, Results: make([]searchResult, 0, resultLimit)}
+	resp := searchResponse{Query: q, Results: make([]searchResult, 0, resultCap)}
 	if q == "" {
 		resp.Timings.TotalMS = sinceMS(start)
 		s.writeJSON(w, http.StatusOK, resp)
@@ -89,67 +87,23 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := r.Context()
-	intentMS, categorical, overlay := s.runIntent(ctx, q)
-
-	sqlStart := time.Now()
-	candidates, err := s.repo.Search(ctx, q, domain.SearchOpts{Lat: lat, Lng: lng, Now: now, Limit: candidateLimit, Overlay: overlay})
+	ranked, timings, err := s.svc.Search(ctx, q, domain.SearchOpts{Lat: lat, Lng: lng, Now: now})
 	if err != nil {
-		s.log.ErrorContext(ctx, "search retrieval failed", "err", err)
+		s.log.ErrorContext(ctx, "search failed", "err", err)
 		s.writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "search failed"})
 		return
 	}
-	pin, found, err := s.repo.ExactName(ctx, q)
-	if err != nil {
-		s.log.ErrorContext(ctx, "exact-name lookup failed", "err", err)
-		s.writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "search failed"})
-		return
-	}
-	sqlMS := sinceMS(sqlStart)
-
-	// A categorical query (e.g. "coffee", "spa") names a category, not one
-	// business, so suppress the pin even when a literally-named business matched.
-	var pinPtr *domain.Candidate
-	if found && !categorical {
-		pinPtr = &pin
-	}
-
-	rerankStart := time.Now()
-	ranked, err := rank.Run(ctx, candidates, pinPtr, s.cfg, domain.SearchOpts{Lat: lat, Lng: lng, Now: now, Limit: resultLimit})
-	if err != nil {
-		s.log.ErrorContext(ctx, "ranking failed", "err", err)
-		s.writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "search failed"})
-		return
-	}
-	rerankMS := sinceMS(rerankStart)
 
 	for i := range ranked {
 		resp.Results = append(resp.Results, toResult(&ranked[i]))
 	}
 	resp.Timings = searchTimings{
-		IntentMS: intentMS,
-		SQLMS:    sqlMS,
-		RerankMS: rerankMS,
+		IntentMS: timings.IntentMS,
+		SQLMS:    timings.SQLMS,
+		RerankMS: timings.RerankMS,
 		TotalMS:  sinceMS(start),
 	}
 	s.writeJSON(w, http.StatusOK, resp)
-}
-
-// runIntent runs the flag-gated intent extractor and reports the time spent,
-// whether the query is categorical (used to suppress the exact-name pin), and
-// the overlay (threaded into retrieval to narrow candidates). With the flag off
-// it is a no-op — zero time, not categorical, zero overlay — so the search path
-// behaves exactly as it did before the extractor was wired in.
-func (s *Server) runIntent(ctx context.Context, q string) (intentMS int64, categorical bool, overlay domain.Overlay) {
-	if !s.intentEnabled {
-		return 0, false, domain.Overlay{}
-	}
-	intentStart := time.Now()
-	overlay = intent.Extract(q)
-	categorical = intent.IsCategorical(q)
-	intentMS = sinceMS(intentStart)
-	s.log.DebugContext(ctx, "intent extracted",
-		"q", q, "categorical", categorical, "overlay_zero", overlay.IsZero())
-	return intentMS, categorical, overlay
 }
 
 // toResult maps a ranked result onto the C4 DTO. The exact-name pin carries a

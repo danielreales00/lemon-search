@@ -39,6 +39,8 @@ components:
     in: internal/intent/**
   rank:
     in: internal/rank/**
+  search:
+    in: internal/search/**
   config:
     in: internal/config/**
   observ:
@@ -94,6 +96,12 @@ deps:
     mayDependOn: [domain, config]
     anyVendorDeps: false
 
+  # search: the search use-case. Orchestrates intent → retrieval → re-rank over
+  # the domain ports; pure composition, no infra (no pgx, no net/http).
+  search:
+    mayDependOn: [domain, intent, rank, config, observ]
+    anyVendorDeps: false
+
   # ingest: ingestion pipeline. The stream parser itself imports only stdlib;
   # later ingest stages compose domain shapes, config, logging, and the loader.
   ingest:
@@ -105,14 +113,18 @@ deps:
     mayDependOn: [domain]
     canUse: [pgx, pgxpool]
 
-  # api: HTTP transport; composes everything except cmd
+  # api: thin HTTP transport. Production code imports only domain, search, and
+  # rank (verify: grep the non-test files) — intent/config/DB now live behind the
+  # search service. config + retrieve-postgres are TEST-ONLY here: the e2e/search
+  # tests wire a real service against a live DB, and go-arch-lint (deepScan) also
+  # analyses *_test.go, so they must stay in the allowlist.
   api:
-    mayDependOn: [domain, intent, rank, config, observ, retrieve-postgres]
+    mayDependOn: [domain, search, rank, observ, config, retrieve-postgres]
     canUse: [net-http]
 
   # cmd-api: composition root for the server
   cmd-api:
-    mayDependOn: [domain, api, intent, rank, config, observ, flags, retrieve-postgres]
+    mayDependOn: [domain, api, search, intent, rank, config, observ, flags, retrieve-postgres]
     canUse: [net-http, pgx, pgxpool, yaml]
 
   # cmd-ingest: ingestion CLI; no HTTP needed
@@ -120,9 +132,9 @@ deps:
     mayDependOn: [domain, ingest, retrieve-postgres, config, observ]
     canUse: [pgx, pgxpool, yaml]
 
-  # cmd-bench-runner: in-process bench harness; wires repo + ranker like cmd-api.
-  # Uses intent for the categorical pin guard so the bench measures feature-ON
-  # behavior. Talks to Meilisearch over its REST API (net/http) for the engine A/B.
+  # cmd-bench-runner: in-process bench harness; wires repo + config into the
+  # search service (intent ON) so the bench measures the feature-ON path. Talks
+  # to Meilisearch over its REST API (net/http) for the engine A/B.
   cmd-bench-runner:
-    mayDependOn: [domain, config, rank, intent, retrieve-postgres]
+    mayDependOn: [domain, config, rank, search, retrieve-postgres]
     canUse: [pgx, pgxpool, net-http]

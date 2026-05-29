@@ -18,7 +18,7 @@ func (f fakePinger) Ping(context.Context) error { return f.err }
 func newTestServer(p Pinger) http.Handler {
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	build := BuildInfo{Version: "1.2.3", Commit: "abc123", Date: "2026-05-28T00:00:00Z"}
-	return New(log, p, nil, nil, build, false).Handler()
+	return New(log, p, nil, build).Handler()
 }
 
 func doGet(t *testing.T, h http.Handler, path string) *httptest.ResponseRecorder {

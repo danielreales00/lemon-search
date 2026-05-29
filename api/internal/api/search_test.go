@@ -15,6 +15,7 @@ import (
 
 	"github.com/danielreales00/lemon-search/api/internal/config"
 	"github.com/danielreales00/lemon-search/api/internal/domain"
+	"github.com/danielreales00/lemon-search/api/internal/search"
 )
 
 func ptr[T any](v T) *T { return &v }
@@ -74,7 +75,13 @@ func newSearchServerFF(t *testing.T, repo domain.BusinessRepo, cfg *config.Ranki
 	t.Helper()
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	build := BuildInfo{Version: "test", Commit: "test", Date: "2026-05-28T00:00:00Z"}
-	return New(log, fakePinger{}, repo, cfg, build, intentEnabled).Handler()
+	// Mirror cmd/api: no service without both a repo and a config, so /search
+	// reports 503 (the unavailable-deps test relies on this).
+	var svc *search.Service
+	if repo != nil && cfg != nil {
+		svc = search.New(log, repo, cfg, intentEnabled)
+	}
+	return New(log, fakePinger{}, svc, build).Handler()
 }
 
 func decodeSearch(t *testing.T, rec *httptest.ResponseRecorder) searchResponse {

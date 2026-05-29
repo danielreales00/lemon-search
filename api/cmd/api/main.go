@@ -28,6 +28,7 @@ import (
 	"github.com/danielreales00/lemon-search/api/internal/flags"
 	"github.com/danielreales00/lemon-search/api/internal/observ"
 	pgrepo "github.com/danielreales00/lemon-search/api/internal/retrieve/postgres"
+	"github.com/danielreales00/lemon-search/api/internal/search"
 )
 
 // Stamped at link time via -ldflags '-X main.version=... -X main.commit=... -X main.date=...'.
@@ -76,10 +77,17 @@ func run(ctx context.Context, logger *slog.Logger) error {
 	cfg := loadRanking(logger, os.Getenv("LEMON_RANKING_CONFIG"))
 	ff := flags.FromEnv()
 
+	// The search service needs both a repo and a config; without either, leave
+	// svc nil so /search reports 503 while the health endpoints keep working.
+	var svc *search.Service
+	if repo != nil && cfg != nil {
+		svc = search.New(logger, repo, cfg, ff.Intent)
+	}
+
 	build := api.BuildInfo{Version: version, Commit: commit, Date: date}
 	srv := &http.Server{
 		Addr:              addr(),
-		Handler:           api.New(logger, pinger, repo, cfg, build, ff.Intent).Handler(),
+		Handler:           api.New(logger, pinger, svc, build).Handler(),
 		ReadHeaderTimeout: readHeaderTO,
 	}
 
