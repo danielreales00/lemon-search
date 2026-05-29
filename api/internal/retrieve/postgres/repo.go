@@ -38,7 +38,7 @@ const candidateColumns = `
 	id, name, category, subcategory, archetype, neighborhood,
 	distance_km, lemon_score, google_rating, google_review_count,
 	price_range, photo_count, photo_url, is_claimed, friend_count,
-	is_new, is_open_now, opens_later, hours, text_score, name_trigram`
+	is_new, is_open_now, opens_later, hours`
 
 // searchSQL invokes the retrieval function, threading the intent overlay
 // (contract C5) as bound params $6–$11. A zero overlay yields no-op params (nil
@@ -71,8 +71,6 @@ const exactNameSQL = `
 		b.is_claimed, b.friend_count, b.is_new,
 		os.is_open_now, coalesce(os.opens_later, false) as opens_later,
 		b.hours,
-		0::float8 as text_score,
-		similarity(b.name, $1)::float8 as name_trigram,
 		count(*) over () as match_count
 	from businesses b
 	cross join lateral lemon_open_status(
@@ -203,7 +201,7 @@ func newCandidate() (c *domain.Candidate, archetype *string, hours *[]byte) {
 
 // candidateScanDests returns the Scan destinations for the candidateColumns
 // projection, in order. Both the search and exact-name paths use it so the
-// 21-column scan lives in one place (the exact-name path appends match_count).
+// 19-column scan lives in one place (the exact-name path appends match_count).
 func candidateScanDests(c *domain.Candidate, archetype *string, hours *[]byte) []any {
 	return []any{
 		&c.ID,
@@ -225,8 +223,6 @@ func candidateScanDests(c *domain.Candidate, archetype *string, hours *[]byte) [
 		&c.IsOpenNow,
 		&c.OpensLater,
 		hours,
-		&c.TextScore,
-		&c.NameTrigram,
 	}
 }
 
