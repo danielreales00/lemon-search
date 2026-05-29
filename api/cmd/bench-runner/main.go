@@ -19,6 +19,9 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
+	"log/slog"
+	"math"
 	"math/rand"
 	"os"
 	"sort"
@@ -29,18 +32,16 @@ import (
 
 	"github.com/danielreales00/lemon-search/api/internal/config"
 	"github.com/danielreales00/lemon-search/api/internal/domain"
-	"github.com/danielreales00/lemon-search/api/internal/intent"
 	"github.com/danielreales00/lemon-search/api/internal/rank"
 	pgrepo "github.com/danielreales00/lemon-search/api/internal/retrieve/postgres"
+	"github.com/danielreales00/lemon-search/api/internal/search"
 )
 
 const (
-	defaultDB      = "postgres://postgres:postgres@localhost:54322/postgres?sslmode=disable"
-	candidateLimit = 150
-	resultLimit    = 15
-	topK           = 3
-	pctl95         = 95
-	maxFailLines   = 30
+	defaultDB    = "postgres://postgres:postgres@localhost:54322/postgres?sslmode=disable"
+	topK         = 3
+	pctl95       = 95
+	maxFailLines = 30
 
 	genLat = 25.7741728
 	genLng = -80.1937
@@ -181,38 +182,37 @@ func run(o opts) error {
 		return fmt.Errorf("parsing now_override %q: %w", bf.NowOverride, err)
 	}
 
-	// Retrieve once per test (Search + ExactName are formula-independent); every
-	// mode re-ranks the SAME candidate sets so the comparison isolates ranking.
-	retrieved := make([]retrieval, 0, len(bf.Tests))
-	for i := range bf.Tests {
-		retrieved = append(retrieved, retrieve(ctx, repo, bf, now, bf.Tests[i]))
-	}
-
 	if o.formula == formulaAll {
-		return runComparison(ctx, cfg, bf, now, retrieved, o)
+		return runComparison(ctx, cfg, repo, bf, now, o)
 	}
-	return runSingle(ctx, cfg, bf, now, retrieved, o)
+	return runSingle(ctx, cfg, repo, bf, now, o)
 }
 
-// runSingle ranks every test under one formula mode and prints the console
-// report (the pre-existing single-run behavior).
-func runSingle(ctx context.Context, cfg *config.Ranking, bf benchFile, now time.Time, retrieved []retrieval, o opts) error {
+// benchLogger is a no-op logger: the bench drives the search service in-process
+// and prints its own report, so the service's debug lines are discarded.
+func benchLogger() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }
+
+// runSingle ranks every test under one formula mode through the search service
+// and prints the console report (the pre-existing single-run behavior). Intent
+// is enabled so the bench measures the feature-ON path (the categorical pin
+// guard), matching production with LEMON_FF_INTENT on.
+func runSingle(ctx context.Context, cfg *config.Ranking, repo domain.BusinessRepo, bf benchFile, now time.Time, o opts) error {
 	m, err := singleMode(o.formula)
 	if err != nil {
 		return err
 	}
 	applyMode(cfg, m)
-	results, err := rankAll(ctx, cfg, bf, now, retrieved)
-	if err != nil {
-		return err
-	}
+	svc := search.New(benchLogger(), repo, cfg, true)
+	results := rankAll(ctx, svc, bf, now)
 	report(fmt.Sprintf("%s formula=%s", o.label, m.name), len(results), results)
 	return nil
 }
 
-// runComparison ranks the shared case set under each formula mode and writes a
-// markdown table comparing pass@3 (overall + by kind) and latency.
-func runComparison(ctx context.Context, cfg *config.Ranking, bf benchFile, now time.Time, retrieved []retrieval, o opts) error {
+// runComparison ranks the case set under each formula mode and writes a markdown
+// table comparing pass@3 (overall + by kind) and latency. Each mode gets its own
+// search.Service over the shared repo; the SignalFormulas differ per service, so
+// the table isolates the ranking formula (retrieval is identical across modes).
+func runComparison(ctx context.Context, cfg *config.Ranking, repo domain.BusinessRepo, bf benchFile, now time.Time, o opts) error {
 	modes := []mode{
 		modeLiteral(),
 		{name: formulaBayesian, rating: ratingBayesian, distance: distanceLiteral},
@@ -221,16 +221,13 @@ func runComparison(ctx context.Context, cfg *config.Ranking, bf benchFile, now t
 	runs := make([]modeRun, 0, len(modes))
 	for _, m := range modes {
 		applyMode(cfg, m)
-		results, err := rankAll(ctx, cfg, bf, now, retrieved)
-		if err != nil {
-			return fmt.Errorf("mode %s: %w", m.name, err)
-		}
-		runs = append(runs, modeRun{mode: m, results: results})
+		svc := search.New(benchLogger(), repo, cfg, true)
+		runs = append(runs, modeRun{mode: m, results: rankAll(ctx, svc, bf, now)})
 	}
 	if err := writeComparison(o.reportOut, o.generate, o.seed, runs); err != nil {
 		return err
 	}
-	fmt.Printf("wrote comparison report: %s (%d cases, %d modes)\n", o.reportOut, len(retrieved), len(runs))
+	fmt.Printf("wrote comparison report: %s (%d cases, %d modes)\n", o.reportOut, len(bf.Tests), len(runs))
 	return nil
 }
 
@@ -260,17 +257,15 @@ func applyMode(cfg *config.Ranking, m mode) {
 	cfg.SignalFormulas.Distance = m.distance
 }
 
-// rankAll re-ranks each retrieval under the current cfg and scores it.
-func rankAll(ctx context.Context, cfg *config.Ranking, bf benchFile, now time.Time, retrieved []retrieval) ([]result, error) {
-	results := make([]result, 0, len(retrieved))
-	for _, r := range retrieved {
-		res, err := rankOne(ctx, cfg, bf, now, r)
-		if err != nil {
-			return nil, err
-		}
-		results = append(results, res)
+// rankAll runs every test through the search service and scores it. A per-test
+// failure is carried on its result row (not returned), so the whole set always
+// produces a report.
+func rankAll(ctx context.Context, svc *search.Service, bf benchFile, now time.Time) []result {
+	results := make([]result, 0, len(bf.Tests))
+	for i := range bf.Tests {
+		results = append(results, runOne(ctx, svc, bf, now, bf.Tests[i]))
 	}
-	return results, nil
+	return results
 }
 
 func buildRepo(o opts, pool *pgxpool.Pool) (domain.BusinessRepo, error) {
@@ -404,71 +399,39 @@ var accentRepl = strings.NewReplacer(
 
 func stripAccents(s string) string { return accentRepl.Replace(s) }
 
-// retrieval is one test's formula-independent input: the candidate set and the
-// resolved pin. Captured once, then re-ranked under every formula mode.
-type retrieval struct {
-	t          test
-	cands      []domain.Candidate
-	pin        *domain.Candidate
-	pinFired   bool
-	retrieveMs int64 // Search + ExactName wall time; identical across modes
-	err        error // a retrieval failure; surfaced as the result error per mode
-}
-
 // modeRun bundles a formula mode with the results it produced over the shared set.
 type modeRun struct {
 	mode    mode
 	results []result
 }
 
-// retrieve runs Search + ExactName once. Both are formula-independent, so the
-// returned candidates/pin are reused across every ranking mode. now feeds the
-// SQL is_open_now / opens_later computation, so it must be the real bench clock.
-func retrieve(ctx context.Context, repo domain.BusinessRepo, bf benchFile, now time.Time, t test) retrieval {
-	o := domain.SearchOpts{Lat: bf.UserLocation.Lat, Lng: bf.UserLocation.Lng, Now: now, Limit: candidateLimit}
+// runOne runs a single test through the search service and scores it. now feeds
+// the SQL is_open_now / opens_later computation, so it must be the real bench
+// clock. The service owns the candidate/result limits and the categorical pin
+// guard, so the bench measures exactly the production path.
+func runOne(ctx context.Context, svc *search.Service, bf benchFile, now time.Time, t test) result {
+	o := domain.SearchOpts{Lat: bf.UserLocation.Lat, Lng: bf.UserLocation.Lng, Now: now}
 	start := time.Now()
-	cands, err := repo.Search(ctx, t.Q, o)
+	ranked, _, err := svc.Search(ctx, t.Q, o)
 	if err != nil {
-		return retrieval{t: t, err: fmt.Errorf("search: %w", err)}
-	}
-	pin, found, err := repo.ExactName(ctx, t.Q)
-	if err != nil {
-		return retrieval{t: t, err: fmt.Errorf("exactname: %w", err)}
+		// A per-test failure is data, not a run-fatal error: record it on the
+		// result so the report shows a failing row, and keep going.
+		return result{kind: t.Kind, q: t.Q, err: fmt.Errorf("search %q: %w", t.Q, err)}
 	}
 	ms := time.Since(start).Milliseconds()
-	// Mirror the handler's feature-ON behavior unconditionally: a categorical
-	// query (e.g. "coffee") suppresses the pin even when a literally-named
-	// business matched. The cardinality back-off already happened in ExactName.
-	pinFired := found && !intent.IsCategorical(t.Q)
-	r := retrieval{t: t, cands: cands, pinFired: pinFired, retrieveMs: ms}
-	if pinFired {
-		r.pin = &pin
-	}
-	return r
-}
 
-// rankOne re-ranks a captured retrieval under the current cfg and scores it.
-// Reported latency is retrieve + rerank; the retrieve component is identical
-// across modes, so the table still isolates each mode's ranking cost.
-func rankOne(ctx context.Context, cfg *config.Ranking, bf benchFile, now time.Time, r retrieval) (result, error) {
-	if r.err != nil {
-		// A retrieval failure is per-test data, not a run-fatal error: record it
-		// on the result so the report shows a failing row, and keep ranking the rest.
-		return result{kind: r.t.Kind, q: r.t.Q, err: r.err}, nil //nolint:nilerr // failure carried in result.err, not returned
-	}
-	o := domain.SearchOpts{Lat: bf.UserLocation.Lat, Lng: bf.UserLocation.Lng, Now: now, Limit: resultLimit}
-	start := time.Now()
-	ranked, err := rank.Run(ctx, r.cands, r.pin, cfg, o)
-	if err != nil {
-		return result{}, fmt.Errorf("rank %q: %w", r.t.Q, err)
-	}
-	ms := r.retrieveMs + time.Since(start).Milliseconds()
-
+	fired := pinFired(ranked)
 	top1 := ""
 	if len(ranked) > 0 {
 		top1 = ranked[0].Candidate.Name
 	}
-	return result{kind: r.t.Kind, q: r.t.Q, top1: top1, pass: score(r.t, ranked, r.pinFired), pinFired: r.pinFired, ms: ms}, nil
+	return result{kind: t.Kind, q: t.Q, top1: top1, pass: score(t, ranked, fired), pinFired: fired, ms: ms}
+}
+
+// pinFired reports whether the exact-name pin fired: rank.Run pins the matched
+// business to position 0 with a +Inf score, so a leading +Inf is the sentinel.
+func pinFired(ranked []rank.Result) bool {
+	return len(ranked) > 0 && math.IsInf(ranked[0].Score, 1)
 }
 
 // score: over_fire passes iff the pin did NOT fire; else pass@3 on expected.
@@ -582,10 +545,10 @@ func writeComparison(path string, generate int, seed int64, runs []modeRun) erro
 	fmt.Fprintf(&b, "Generated by `bench-runner -generate %d -seed %d -formula all` against the\n", generate, seed)
 	b.WriteString("local Postgres (22,568 rows). Each sampled business expands into exact/typo/\n")
 	b.WriteString("accent/partial query variants (plus 25 bare-category over_fire probes).\n")
-	b.WriteString("Every mode re-ranks the **same** retrieved candidate sets (Search +\n")
-	b.WriteString("ExactName are formula-independent), so the table isolates the ranking\n")
-	b.WriteString("formula. Modes differ only in `signal_formulas` (set in memory;\n")
-	b.WriteString("`config/ranking.yaml` is untouched):\n\n")
+	b.WriteString("Each mode runs the same query set through its own `search.Service`; retrieval\n")
+	b.WriteString("(Search + ExactName) is formula-independent and returns identical candidate\n")
+	b.WriteString("sets, so the table isolates the ranking formula. Modes differ only in\n")
+	b.WriteString("`signal_formulas` (set in memory; `config/ranking.yaml` is untouched):\n\n")
 	b.WriteString("- **literal** — spec default (`rating=lemon_score/10`, `distance=max(1-d/30mi,0)`)\n")
 	b.WriteString("- **bayesian** — `rating` smoothed over `google_rating` (0–5), prior C=20, m=4.3\n")
 	b.WriteString("- **decay** — `distance=exp(-d/decay_km[archetype])`\n\n")

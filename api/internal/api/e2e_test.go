@@ -27,6 +27,7 @@ import (
 
 	"github.com/danielreales00/lemon-search/api/internal/config"
 	"github.com/danielreales00/lemon-search/api/internal/retrieve/postgres"
+	"github.com/danielreales00/lemon-search/api/internal/search"
 )
 
 const e2eDefaultDB = "postgres://postgres:postgres@localhost:54322/postgres?sslmode=disable"
@@ -83,7 +84,7 @@ func TestE2EHealthReadinessVersion(t *testing.T) {
 
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	build := BuildInfo{Version: "e2e", Commit: "e2e", Date: "2026-05-28T00:00:00Z"}
-	srv := httptest.NewServer(New(log, pool, nil, nil, build, false).Handler())
+	srv := httptest.NewServer(New(log, pool, nil, build).Handler())
 	defer srv.Close()
 	client := srv.Client()
 
@@ -120,7 +121,8 @@ func TestE2ESearch(t *testing.T) {
 	build := BuildInfo{Version: "e2e", Commit: "e2e", Date: "2026-05-28T00:00:00Z"}
 	// Intent on here exercises the full Stage-3 path (extractor + categorical
 	// guard) end-to-end; "coffee" is categorical so the pin is suppressed.
-	srv := httptest.NewServer(New(log, pool, repo, cfg, build, true).Handler())
+	svc := search.New(log, repo, cfg, true)
+	srv := httptest.NewServer(New(log, pool, svc, build).Handler())
 	defer srv.Close()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
