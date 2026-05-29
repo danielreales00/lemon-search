@@ -118,7 +118,10 @@ as $fn$
     and (cardinality(p_universal) = 0 or b.universal_tags && p_universal)
     and (cardinality(p_specific) = 0 or b.specific_tags && p_specific)
     and (cardinality(p_prices) = 0 or b.price_range = any(p_prices))
-    and (not p_require_open or os.is_open_now is true)
+    -- require_open drops only definitively-closed rows. Unknown-hours rows
+    -- (is_open_now null, ~19% of data) are NEVER hard-filtered — they stay as
+    -- soft-open and the ranker scores them 0.7 (see CLAUDE.md / decision D8).
+    and (not p_require_open or os.is_open_now is not false)
   order by
     -- Recall ordering: blend text rank + name similarity when there's a query;
     -- otherwise surface popular-then-near rows so an empty query is useful.

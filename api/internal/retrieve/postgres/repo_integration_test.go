@@ -378,17 +378,18 @@ func TestSearchOverlayPriceNarrows(t *testing.T) {
 	assertFixtureSet(t, drop, nil, all)
 }
 
-// TestSearchOverlayRequireOpenNarrows: RequireOpenNow keeps only rows whose
-// is_open_now is TRUE at fixedNow (Mon 2pm). It drops definitively-closed AND
-// unknown-hours rows — preserving the function's pre-existing `is_open_now is
-// true` semantics. Only "Sushi Near" (open 9–9) survives.
+// TestSearchOverlayRequireOpenNarrows: RequireOpenNow drops only
+// definitively-closed rows; unknown-hours rows are kept as soft-open and never
+// hard-filtered (CLAUDE.md / decision D8). At fixedNow (Mon 2pm): "Sushi Near"
+// (open 9–9) and "Unknown Hours Spa" (null hours) survive; "Sushi Far" (opens
+// 5pm, closed now) and "Closed Barber" (closed all day) drop.
 func TestSearchOverlayRequireOpenNarrows(t *testing.T) {
 	pool, ctx := setup(t)
 
 	got := fixtureNames(mustSearchOverlay(ctx, t, pool, "ZZFIXTURE", domain.Overlay{RequireOpenNow: true}))
 	assertFixtureSet(t, got,
-		[]string{"ZZFIXTURE Sushi Near"},
-		[]string{"ZZFIXTURE Sushi Far", "ZZFIXTURE Closed Barber", "ZZFIXTURE Unknown Hours Spa"})
+		[]string{"ZZFIXTURE Sushi Near", "ZZFIXTURE Unknown Hours Spa"},
+		[]string{"ZZFIXTURE Sushi Far", "ZZFIXTURE Closed Barber"})
 }
 
 // --- helpers ---
