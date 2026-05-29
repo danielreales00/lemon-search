@@ -218,16 +218,20 @@ archetype-specific filter logic.
 
 ## Exact-name pin (step 6)
 
-The retrieval phase runs a separate SQL query for the exact-name path:
+The retrieval phase runs a separate SQL query for the exact-name path. A
+trigram GIN pre-filter (`name % $q`) narrows candidates cheaply, then
+`lemon_name_match($q, name)` — token **coverage** plus per-word Levenshtein —
+scores how much of the *full name* the query spans, typo-tolerantly:
 
 ```sql
-SELECT … FROM businesses
-WHERE similarity(name, $q) >= 0.85
-ORDER BY similarity(name, $q) DESC
+SELECT …, count(*) OVER () AS match_count
+FROM businesses
+WHERE name % $q AND lemon_name_match($q, name) >= 0.8
+ORDER BY lemon_name_match($q, name) DESC, id
 LIMIT 1
 ```
 
-If that path returns a row, the ranker:
+If that path returns a row and it survives the two back-offs below, the ranker:
 
 1. Removes that row from the broad-recall result (dedup by `id`).
 2. Sets its `score` to `+Inf` (positive infinity in Go).
@@ -237,30 +241,58 @@ Spec text: "regardless of other ranking signals." The `+Inf` is how we
 honor "regardless" literally — sort order puts it first; tie-break never
 kicks in.
 
-The 0.85 threshold lives in `config.exact_name.similarity_threshold`.
+The `0.8` coverage bar is `nameMatchCoverage` in
+`api/internal/retrieve/postgres/repo.go`.
 
-### Why similarity-only, not a bare prefix (realignment 2026-05-28)
+### The hybrid: coverage matcher + two back-offs (Stage 3)
 
-An earlier version also pinned on `name ILIKE $q || '%'`. That conflated two
-**separate** spec requirements with deliberately different verbs — exact name
-"returns that business first, **regardless** of other ranking signals" (a hard
-override) vs. partial/prefix "**surfaces** `best steakhouse`" (rank, don't
-override) — and over-fired: `coffee` pinned "Coffee To Go", `sushi` pinned
-"Sushi Joe", both *category* leaves in the taxonomy. Prefix/partial recall is
-`search_candidates`' job (ranked), not the pin, so the `ILIKE` clause is gone.
+The Stage-2 version pinned on trigram `similarity ≥ 0.85`. Trigram alone cannot
+separate a typo'd *full name* from a *category prefix* — measured on the data,
+the spec's own example `joes barbr shop → Joe's Barber Shop` scores ≈ **0.57**,
+the *same band* as the false positives (`coffee`→"Coffee To Go" 0.54,
+`sushi`→"Sushi Joe" 0.60), so no single similarity threshold separates them.
+Stage 3 stops trying to discriminate on one number and layers three orthogonal
+conditions instead; a high coverage score is now *necessary* but not
+*sufficient* to honor "returns that business first, regardless".
 
-**Known Stage-2 limitation.** Trigram alone cannot separate a typo'd *full
-name* from a *category prefix* — measured on the data, the spec's own example
-`joes barbr shop → Joe's Barber Shop` scores ≈ **0.57**, the *same band* as the
-false positives (`coffee`→"Coffee To Go" 0.54, `sushi`→"Sushi Joe" 0.60), so no
-single threshold separates them. Because the pin is a max-cost override (a false
-positive is catastrophic; a false negative merely demotes a still-ranked
-result), 0.85 is deliberately conservative — only near-exact names pin. The
-proper discriminator is name **coverage** (the query spans most of the full
-name) **AND** suppression when the query is a known taxonomy term; that is
-**deferred to the Stage-3 intent layer** (the lexicon already knows
-`coffee`/`sushi` are categories), where the pin also folds into the main
-retrieval so it gets real distance and drops a per-keystroke round-trip.
+**Coverage, not raw similarity.** `lemon_name_match` measures how much of the
+business's name the query covers (token coverage) while tolerating per-word
+typos (Levenshtein). A typo'd full name like `joes barbr shop` covers
+"Joe's Barber Shop" and clears 0.8; a category word like `coffee` covers only a
+fraction of "Coffee To Go" and does not. This is the "spans most of the full
+name" discriminator the Stage-2 note deferred. `similarity(name, $q)` survives
+only as the `name_trigram` display field.
+
+**Back-off 1 — cardinality (always on).** The query also returns
+`match_count = count(*) OVER ()`; the pin is suppressed when more than **5**
+businesses share the matched name (`maxNameMatches`). A name that resolves to
+many rows ("7-Eleven", "Subway") is a *chain*, not a unique business, and
+pinning one arbitrary location ahead of a better-ranked sibling violates the
+spec's intent more than it serves it. This is a property of the data, not the
+query, so it needs no feature flag and is on unconditionally.
+
+**Back-off 2 — categorical suppression (flag-gated, `LEMON_FF_INTENT`).** The
+search handler drops the pin when the *entire* query is composed of category /
+cuisine / domain terms — `intent.IsCategorical(q)`. So `coffee` and `spa` rank
+their candidates instead of pinning a business literally named that, while
+`joes barbr shop` (no categorical token) still pins. The intent lexicon already
+knows which tokens are taxonomy leaves (Café→Coffee Shop, …), so this is the
+"suppress when the query is a known taxonomy term" discriminator the Stage-2
+note called for. It rides behind `LEMON_FF_INTENT` because it depends on the
+intent layer; with the flag off, only the cardinality back-off applies. A query
+of *only* price/time modifiers (`cheap`, `open now`) is **not** categorical —
+those entries narrow by price/open-now, not category — so the pin may still
+serve it.
+
+The pin remains a max-cost override (a false positive is catastrophic; a false
+negative merely demotes a still-ranked result), so all three conditions are
+tuned to favor precision. Measured effect: the `over_fire` bench mode went from
+**76% → 100%** (25/25) while typo held at **97%** — see
+[the over-fire resolution in the writeup](../writeup.md#spec-ambiguities--calls).
+
+The pin still folds *into* the main retrieval (for real distance and one fewer
+round-trip) only once the overlay is threaded through `search_candidates`; until
+then it stays a separate query carrying a distance sentinel.
 
 ## Tie-breaking (step 7)
 
