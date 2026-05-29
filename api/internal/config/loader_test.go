@@ -192,6 +192,57 @@ func TestLoadValidationErrors(t *testing.T) {
 	}
 }
 
+// TestLoadBayesianSourceValidation: the source enum is enforced only when the
+// bayesian formula is active. A valid source loads; an unknown one fails fast;
+// the literal default ignores source entirely.
+func TestLoadBayesianSourceValidation(t *testing.T) {
+	t.Parallel()
+
+	bayesianYAML := strings.Replace(validYAML, "rating: literal", "rating: bayesian", 1)
+
+	t.Run("valid source under bayesian loads", func(t *testing.T) {
+		t.Parallel()
+		cfg, err := Load(strings.NewReader(bayesianYAML))
+		if err != nil {
+			t.Fatalf("Load rejected bayesian config with valid source: %v", err)
+		}
+		if got, want := cfg.SignalFormulas.Rating, "bayesian"; got != want {
+			t.Errorf("rating mode = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("lemon_score source under bayesian loads", func(t *testing.T) {
+		t.Parallel()
+		src := strings.Replace(bayesianYAML, "source: google_rating", "source: lemon_score", 1)
+		if _, err := Load(strings.NewReader(src)); err != nil {
+			t.Fatalf("Load rejected bayesian config with source=lemon_score: %v", err)
+		}
+	})
+
+	t.Run("unknown source under bayesian fails", func(t *testing.T) {
+		t.Parallel()
+		src := strings.Replace(bayesianYAML, "source: google_rating", "source: made_up", 1)
+		_, err := Load(strings.NewReader(src))
+		if err == nil {
+			t.Fatalf("Load accepted bayesian config with unknown source")
+		}
+		if !errors.Is(err, ErrInvalidConfig) {
+			t.Errorf("error %v is not ErrInvalidConfig", err)
+		}
+		if !strings.Contains(err.Error(), "bayesian_rating.source") {
+			t.Errorf("error %q does not mention bayesian_rating.source", err.Error())
+		}
+	})
+
+	t.Run("literal default ignores unknown source", func(t *testing.T) {
+		t.Parallel()
+		src := strings.Replace(validYAML, "source: google_rating", "source: made_up", 1)
+		if _, err := Load(strings.NewReader(src)); err != nil {
+			t.Fatalf("literal rating must not validate source, got: %v", err)
+		}
+	})
+}
+
 func TestLoadMissingRequiredBlock(t *testing.T) {
 	t.Parallel()
 

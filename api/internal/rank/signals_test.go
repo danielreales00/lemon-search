@@ -25,7 +25,10 @@ const eps = 1e-9
 
 func almostEqual(a, b float64) bool { return math.Abs(a-b) < eps }
 
-func TestSignalDistance(t *testing.T) {
+// TestSignalDistanceLiteral pins the spec-literal default: closer is higher,
+// capped at 30 mi. These are the values the shipping config must reproduce.
+func TestSignalDistanceLiteral(t *testing.T) {
+	cfg := loadCfg(t) // default config ships distance = literal
 	tests := []struct {
 		name string
 		km   float64
@@ -40,15 +43,51 @@ func TestSignalDistance(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			c := domain.Candidate{DistanceKM: tc.km}
-			if got := signalDistance(&c); !almostEqual(got, tc.want) {
+			if got := signalDistance(&c, cfg); !almostEqual(got, tc.want) {
 				t.Fatalf("signalDistance(%v) = %v, want %v", tc.km, got, tc.want)
 			}
 		})
 	}
 }
 
-func TestSignalRating(t *testing.T) {
+// TestSignalDistanceDecay covers the per-archetype exponential mode and the
+// graceful fallback when an archetype has no (or a non-positive) decay_km.
+func TestSignalDistanceDecay(t *testing.T) {
 	cfg := loadCfg(t)
+	cfg.SignalFormulas.Distance = distanceDecayMode
+	decay := cfg.SignalFormulas.DistanceDecayKM
+	utilKM := decay["utility_distance_dominant"]
+	tests := []struct {
+		name string
+		arch domain.Archetype
+		km   float64
+		want float64
+	}{
+		{"at user location scores one", domain.ArchetypeUtilityDistanceDominant, 0, 1.0},
+		{"utility at one decay-length", domain.ArchetypeUtilityDistanceDominant, utilKM, math.Exp(-1)},
+		{"experiential decays slower at same km", domain.ArchetypeExperiential, utilKM, math.Exp(-utilKM / decay["experiential"])},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			c := domain.Candidate{Archetype: tc.arch, DistanceKM: tc.km}
+			if got := signalDistance(&c, cfg); !almostEqual(got, tc.want) {
+				t.Fatalf("signalDistance(%s,%v) = %v, want %v", tc.arch, tc.km, got, tc.want)
+			}
+		})
+	}
+
+	// Missing/zero decay constant falls back to the literal cap.
+	cfg.SignalFormulas.DistanceDecayKM = map[string]float64{}
+	c := domain.Candidate{Archetype: domain.ArchetypeExperiential, DistanceKM: distanceCapKM / 2}
+	if got := signalDistance(&c, cfg); !almostEqual(got, 0.5) {
+		t.Fatalf("missing decay_km should fall back to literal 0.5, got %v", got)
+	}
+}
+
+// TestSignalRatingLiteral pins the spec-literal default lemon_score/10 plus the
+// new-business demotion. The shipping config must reproduce these values.
+func TestSignalRatingLiteral(t *testing.T) {
+	cfg := loadCfg(t) // default config ships rating = literal
 	demote := cfg.NewBusiness.RatingDemoteFactor
 	tests := []struct {
 		name  string
@@ -70,6 +109,50 @@ func TestSignalRating(t *testing.T) {
 				t.Fatalf("signalRating = %v, want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+// bayes computes the expected Bayesian rating signal for a test row, mirroring
+// the formula so the table states intent rather than re-deriving it inline.
+func bayes(r, n, c, m float64) float64 { return ((c*m + n*r) / (c + n)) / bayesianScale }
+
+// TestSignalRatingBayesian covers the bayesian switch: the smoothing math, the
+// source selector (google_rating vs lemon_score), nil sources, and that the
+// new-business demotion still composes on top.
+func TestSignalRatingBayesian(t *testing.T) {
+	cfg := loadCfg(t)
+	cfg.SignalFormulas.Rating = ratingBayesianMode
+	b := cfg.SignalFormulas.BayesianRating // C=20, m=4.3, source=google_rating
+	demote := cfg.NewBusiness.RatingDemoteFactor
+	tests := []struct {
+		name    string
+		gRating *float64
+		lemon   *float64
+		reviews int
+		isNew   bool
+		want    float64
+	}{
+		{"nil source scores zero", nil, ptrF(9), 100, false, 0},
+		{"zero reviews pulls to prior mean", ptrF(5.0), nil, 0, false, b.GlobalMean / bayesianScale},
+		{"high reviews pull toward observed", ptrF(4.0), nil, 1000, false, bayes(4.0, 1000, b.PriorStrength, b.GlobalMean)},
+		{"few reviews stay near prior", ptrF(5.0), nil, 5, false, bayes(5.0, 5, b.PriorStrength, b.GlobalMean)},
+		{"new business demotion composes", ptrF(4.0), nil, 1000, true, bayes(4.0, 1000, b.PriorStrength, b.GlobalMean) * demote},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			c := domain.Candidate{GoogleRating: tc.gRating, LemonScore: tc.lemon, GoogleReviewCount: tc.reviews, IsNew: tc.isNew}
+			if got := signalRating(&c, cfg); !almostEqual(got, tc.want) {
+				t.Fatalf("signalRating(bayesian) = %v, want %v", got, tc.want)
+			}
+		})
+	}
+
+	// source: lemon_score reads LemonScore instead of GoogleRating.
+	cfg.SignalFormulas.BayesianRating.Source = bayesianSourceLemon
+	c := domain.Candidate{LemonScore: ptrF(8.0), GoogleRating: ptrF(2.0), GoogleReviewCount: 50}
+	want := bayes(8.0, 50, b.PriorStrength, b.GlobalMean)
+	if got := signalRating(&c, cfg); !almostEqual(got, want) {
+		t.Fatalf("bayesian source=lemon_score = %v, want %v (must read lemon, not google)", got, want)
 	}
 }
 

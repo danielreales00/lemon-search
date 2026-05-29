@@ -257,23 +257,53 @@ func TestDePinDoesNotMovePin(t *testing.T) {
 	}
 }
 
-// TestRunErrorsOnNonLiteralRating: fail loud on an unimplemented mode.
-func TestRunErrorsOnNonLiteralRating(t *testing.T) {
+// TestRunBayesianRatingMode: the pipeline runs end-to-end under the bayesian
+// rating switch and the score reflects the smoothed formula, not lemon_score/10.
+func TestRunBayesianRatingMode(t *testing.T) {
 	cfg := loadCfg(t)
-	cfg.SignalFormulas.Rating = "bayesian"
-	_, err := Run(context.Background(), nil, nil, cfg, defaultOpts())
-	if err == nil {
-		t.Fatalf("expected error for bayesian rating mode")
+	cfg.SignalFormulas.Rating = ratingBayesianMode
+	c := domain.Candidate{
+		ID: id(1), Archetype: domain.ArchetypeLowStakesFastNearby,
+		LemonScore: ptrF(9.2), GoogleRating: ptrF(4.0), GoogleReviewCount: 100,
+		IsOpenNow: ptrB(true),
+	}
+	got := runScores(t, []domain.Candidate{c}, nil, cfg)
+	if len(got) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(got))
+	}
+	cfgLit := loadCfg(t)
+	if almostEqual(bayesianRating(&c, cfg), literalRating(&c)) {
+		t.Fatalf("test setup: bayesian and literal ratings coincide")
+	}
+	wantScore := scoreCandidate(&c, cfg)
+	if almostEqual(wantScore, scoreCandidate(&c, cfgLit)) {
+		t.Fatalf("bayesian-mode score should differ from literal-mode score")
+	}
+	if !almostEqual(got[0].Score, wantScore) {
+		t.Fatalf("Run score = %v, want %v", got[0].Score, wantScore)
 	}
 }
 
-// TestRunErrorsOnNonLiteralDistance: fail loud on an unimplemented mode.
-func TestRunErrorsOnNonLiteralDistance(t *testing.T) {
+// TestRunDecayDistanceMode: the pipeline runs end-to-end under the decay
+// distance switch and the score reflects the exponential curve.
+func TestRunDecayDistanceMode(t *testing.T) {
 	cfg := loadCfg(t)
-	cfg.SignalFormulas.Distance = "decay"
-	_, err := Run(context.Background(), nil, nil, cfg, defaultOpts())
-	if err == nil {
-		t.Fatalf("expected error for decay distance mode")
+	cfg.SignalFormulas.Distance = distanceDecayMode
+	c := domain.Candidate{
+		ID: id(1), Archetype: domain.ArchetypeUtilityDistanceDominant,
+		DistanceKM: 3, LemonScore: ptrF(9), IsOpenNow: ptrB(true),
+	}
+	got := runScores(t, []domain.Candidate{c}, nil, cfg)
+	if len(got) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(got))
+	}
+	wantScore := scoreCandidate(&c, cfg)
+	cfgLit := loadCfg(t)
+	if almostEqual(wantScore, scoreCandidate(&c, cfgLit)) {
+		t.Fatalf("decay-mode score should differ from literal-mode score")
+	}
+	if !almostEqual(got[0].Score, wantScore) {
+		t.Fatalf("Run score = %v, want %v", got[0].Score, wantScore)
 	}
 }
 
