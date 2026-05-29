@@ -102,6 +102,31 @@ func TestEmbedTextTruncatesLongText(t *testing.T) {
 	}
 }
 
+// TestEmbedTextCapsDenseRow guards the regression that left ~21k rows
+// unembedded: a dense row (many hyphenated tags + long menu `about`) packs >256
+// tokens into well under the old 1000-char cap, so Ollama 400'd the whole batch.
+// The cap must keep any single composed text within the verified-safe bound so a
+// dense row can never overflow its EmbedBatch page.
+func TestEmbedTextCapsDenseRow(t *testing.T) {
+	t.Parallel()
+
+	// Shape of the real culprit ("Takee Outee"): hyphenated tag walls + menu prose.
+	universal := []string{
+		"wheelchair-accessible", "wheelchair-accessible-parking", "kid-friendly",
+		"family-friendly", "solo-friendly", "casual", "accepts-credit-cards",
+		"accepts-debit-cards", "mobile-payments", "parking", "restroom-available",
+		"first-timer-friendly",
+	}
+	specific := []string{"chinese", "comfort-food", "small-plates", "takeout", "delivery"}
+	about := strings.Repeat("orange-chicken general-tso lo-mein fried-rice egg-roll ", 60)
+
+	got := EmbedText("Takee Outee", "Food & Drinks", "Restaurant", universal, specific, about)
+
+	if n := utf8.RuneCountInString(got); n > maxEmbedChars {
+		t.Fatalf("dense row composed to %d runes, want ≤ %d", n, maxEmbedChars)
+	}
+}
+
 func TestEmbedTextTruncatesOnRuneBoundary(t *testing.T) {
 	t.Parallel()
 

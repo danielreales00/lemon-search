@@ -65,6 +65,56 @@ Add a semantic recall channel:
     offline (one Python script) into pgvector and run the semantic bench with
     **no runtime embedder** — isolates the quality question from the runtime.
 
+### Model reconsideration (2026-05-29) — one shared model, and why not a bigger one
+
+Tempting idea: ingest is offline, so embed businesses with a large long-context
+model and keep a small fast one for queries. **It doesn't work** — the recall
+vectors are a matched pair.
+
+- Cosine recall (`embedding <=> $query_vec`) is only meaningful if the business
+  vector and the query vector live in the **same learned space**. Two different
+  models = two spaces = the nearest-neighbour results are noise. So **one model
+  serves both ingest and query** — there is no ingest-only model choice. The one
+  legitimate asymmetry is a *task prefix* on the same model (`search_document:` /
+  `search_query:`), not a different model. A genuinely different model only
+  appears as a cross-encoder **reranker** that scores `(query, business)` pairs
+  and emits no vectors — a *query-time* cost, not an ingest one, and out of scope
+  for the trial.
+- The offline budget therefore buys **context length** (feed the model more
+  text), **not a bigger model** — the query path inherits whatever we pick, and
+  the query path is what the sub-100ms p95 gate grades.
+- And context length is not the bottleneck for the queries embeddings exist to
+  catch. Open-vocabulary *vibe* intent ("chill place to work") is carried by the
+  **tags + the first sentences of `about`**, which `EmbedText` front-loads —
+  inside MiniLM's 256-token window. The truncated tail is low-signal prose. A
+  heavy model would spend the graded latency budget to capture text that does not
+  move recall.
+
+**Decision**: keep **`all-MiniLM-L6-v2` (384d) as the single shared model.** It
+is the only option that embeds a query in-process per keystroke (~5–10ms) and
+holds the p95 gate; nomic / bge-base (~40–80ms) would not. Any upgrade is
+**E5-gated** — measured recall lift on a vibe-query bench weighed against the
+latency cost — and is a one-adapter + one-migration swap behind the `Embedder`
+port.
+
+**Where each "semantic" query shape is handled** (embeddings are load-bearing
+only for the third row; the first two are the spec's own examples and cost
+nothing):
+
+| Query shape | Example | Mechanism |
+|---|---|---|
+| Structured intent | "cheap restaurants", "open now" | intent lexicon → `Overlay` (µs, pure Go) |
+| Phrase → category | "i'm hungry" | intent lexicon → category filter |
+| Open-vocabulary vibe | "chill place to work" | dense embedding recall (MiniLM) |
+
+**E4 blend (refined)**: the vector channel is an **additive** recall arm — it
+UNIONs into the ≤150-candidate pool under the same `Overlay` filters and never
+displaces the lexical guarantees (exact-name pin, typo tolerance, prefix). Fuse
+the lexical and vector candidate lists with **RRF** (tuning-free). Lexical runs
+every keystroke; the query-embed fires on the settled / multi-word query (an
+optimization under MiniLM, not a correctness requirement — each request still
+clears the gate either way).
+
 ## Consequences
 
 **Good**
@@ -97,6 +147,14 @@ Add a semantic recall channel:
 - **E1** (#89) `pgvector` extension + `embedding vector(384)` column + HNSW index (migration) + schema doc.
 - **E2** (#90) `domain.Embedder` port + Ollama adapter (`retrieve/embed/ollama`), flag-gated.
 - **E3** (#91) ingest embedding pass — compute + store business embeddings.
+  **Correction (2026-05-29)**: the embed-text cap shipped as `1000 chars`, but the
+  model limit is **256 tokens** — char count is a bad proxy, and Ollama's
+  `/api/embed` 400s the *whole batch* if any one input overflows, so one dense
+  row poisons its page and only ~1,472/22,568 rows embedded on the first pass.
+  Fix (#100): cap at **512 runes** — a corpus-verified-safe proxy for the
+  256-token / batch-400 ceiling (zero 400s across all 22,568 rows) — and
+  re-embed. The front-loaded composition means only low-signal `about` tail is
+  dropped.
 - **E4** (#92) query-embed in `search.Service` + vector recall blend in `search_candidates`, behind `LEMON_FF_SEMANTIC`.
 - **E5** (#93) semantic bench (NL query set → expected businesses) + **latency measurement** (p50/p95 with vs without) — the go/no-go gate.
 - **E6** (#95) in-process ONNX adapter for production, behind the same port — pursue only if E5 clears the gate.
