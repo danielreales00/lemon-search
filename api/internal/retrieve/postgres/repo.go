@@ -40,11 +40,13 @@ const candidateColumns = `
 	price_range, photo_count, photo_url, is_claimed, friend_count,
 	is_new, is_open_now, opens_later, hours, text_score, name_trigram`
 
-// searchSQL invokes the retrieval function. Overlay params are passed NULL/false
-// at Stage 2; Stage 3 fills them without changing this call's shape.
+// searchSQL invokes the retrieval function, threading the intent overlay
+// (contract C5) as bound params $6–$11. A zero overlay yields no-op params (nil
+// category, empty arrays, false require-open), so retrieval is unnarrowed and
+// the result is identical to passing no overlay at all.
 const searchSQL = `
 	select ` + candidateColumns + `
-	from search_candidates($1, $2, $3, $4, $5, null, null, null, null, false)`
+	from search_candidates($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`
 
 // exactNameSQL is the separate exact-name path: 0–1 rows. A trigram GIN
 // pre-filter (name % $1) narrows candidates cheaply, then lemon_name_match
@@ -97,12 +99,26 @@ func New(pool *pgxpool.Pool) (*Repo, error) {
 }
 
 // Search returns up to opts.Limit raw candidates for q, ordered by the SQL
-// recall blend (text rank + name similarity). Scoring is the ranker's job.
+// recall blend (text rank + name similarity). Scoring is the ranker's job. The
+// overlay's filter fields are passed as bound params; a zero overlay is a no-op.
 func (r *Repo) Search(ctx context.Context, q string, opts domain.SearchOpts) ([]domain.Candidate, error) {
 	ctx, cancel := context.WithTimeout(ctx, queryTO)
 	defer cancel()
 
-	rows, err := r.pool.Query(ctx, searchSQL, q, opts.Lat, opts.Lng, opts.Now, opts.Limit)
+	ov := opts.Overlay
+	rows, err := r.pool.Query(
+		ctx, searchSQL,
+		q, opts.Lat, opts.Lng, opts.Now, opts.Limit,
+		ov.CategoryFilter,
+		// nilToEmpty: a nil slice encodes as SQL NULL, where cardinality(NULL)=0
+		// is itself NULL (not true) and would wrongly drop every row. An empty
+		// (non-nil) slice encodes as '{}', so the no-op clause fires correctly.
+		nilToEmpty(ov.SubcategoryFilter),
+		nilToEmpty(ov.UniversalTagFilter),
+		nilToEmpty(ov.SpecificTagFilter),
+		nilToEmpty(ov.PriceFilter),
+		ov.RequireOpenNow,
+	)
 	if err != nil {
 		return nil, fmt.Errorf("search query: %w", err)
 	}
@@ -156,6 +172,16 @@ func (r *Repo) ExactName(ctx context.Context, q string) (c domain.Candidate, fou
 		return domain.Candidate{}, false, nil
 	}
 	return finishCandidate(cand, archetype, hours), true, nil
+}
+
+// nilToEmpty returns s, or a non-nil empty slice when s is nil, so pgx encodes
+// it as the SQL array literal '{}' rather than NULL. See the call site for why
+// the distinction matters to the overlay's cardinality()-based no-op clauses.
+func nilToEmpty(s []string) []string {
+	if s == nil {
+		return []string{}
+	}
+	return s
 }
 
 // scanCandidate maps one row of candidateColumns into a domain.Candidate.
