@@ -29,6 +29,12 @@ const (
 	distanceDecay   = "decay"
 )
 
+// Valid bayesian_rating.source values (the rating column the smoothing reads).
+const (
+	bayesianSourceGoogle = "google_rating"
+	bayesianSourceLemon  = "lemon_score"
+)
+
 // Load decodes ranking config from r and validates it fail-fast. A successful
 // return means the config is structurally complete and every enum-like field
 // holds a known value; it does not guarantee weights sum to anything.
@@ -85,7 +91,11 @@ func (r *Ranking) validateRequiredBlocks() error {
 
 func (r *Ranking) validateFormulaModes() error {
 	switch r.SignalFormulas.Rating {
-	case ratingLiteral, ratingBayesian:
+	case ratingLiteral:
+	case ratingBayesian:
+		if err := validateBayesianSource(r.SignalFormulas.BayesianRating.Source); err != nil {
+			return err
+		}
 	default:
 		return fmt.Errorf("%w: signal_formulas.rating %q must be one of [%s %s]",
 			ErrInvalidConfig, r.SignalFormulas.Rating, ratingLiteral, ratingBayesian)
@@ -97,6 +107,18 @@ func (r *Ranking) validateFormulaModes() error {
 			ErrInvalidConfig, r.SignalFormulas.Distance, distanceLiteral, distanceDecay)
 	}
 	return nil
+}
+
+// validateBayesianSource rejects an unknown rating source. Checked only when
+// the bayesian formula is active, so the literal default never trips on it.
+func validateBayesianSource(source string) error {
+	switch source {
+	case bayesianSourceGoogle, bayesianSourceLemon:
+		return nil
+	default:
+		return fmt.Errorf("%w: signal_formulas.bayesian_rating.source %q must be one of [%s %s]",
+			ErrInvalidConfig, source, bayesianSourceGoogle, bayesianSourceLemon)
+	}
 }
 
 // validateArchetypes checks every archetype key is one of the six domain

@@ -2,7 +2,6 @@ package rank
 
 import (
 	"context"
-	"fmt"
 	"math"
 	"sort"
 
@@ -18,7 +17,11 @@ type Result struct {
 }
 
 const (
-	literalMode = "literal"
+	// ratingBayesianMode and distanceDecayMode are the opt-in alternative
+	// formulas; any other value selects the spec-literal formula.
+	ratingBayesianMode = "bayesian"
+	distanceDecayMode  = "decay"
+
 	// tieEpsilon is the score band within which two candidates are treated as
 	// tied and resolved by the deterministic tie-break keys.
 	tieEpsilon = 0.005
@@ -49,12 +52,6 @@ func Run(
 ) ([]Result, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
-	}
-	if cfg.SignalFormulas.Rating != literalMode || cfg.SignalFormulas.Distance != literalMode {
-		return nil, fmt.Errorf(
-			"rank: only literal formulas implemented at Stage 2; got rating=%q distance=%q",
-			cfg.SignalFormulas.Rating, cfg.SignalFormulas.Distance,
-		)
 	}
 
 	results := scoreAll(hardFilter(candidates, cfg), cfg)
@@ -114,7 +111,7 @@ func scoreCandidate(c *domain.Candidate, cfg *config.Ranking) float64 {
 func signalValue(name string, c *domain.Candidate, cfg *config.Ranking) float64 {
 	switch name {
 	case signalDistanceName:
-		return signalDistance(c)
+		return signalDistance(c, cfg)
 	case signalRatingName:
 		return signalRating(c, cfg)
 	case signalPopularityName:

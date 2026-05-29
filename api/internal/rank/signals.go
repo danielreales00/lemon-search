@@ -14,28 +14,70 @@ const (
 	distanceCapKM = 48.28
 	// ratingScale converts a 0..10 lemon_score into the 0..1 rating signal.
 	ratingScale = 10.0
+	// bayesianScale normalizes the Bayesian-smoothed rating (on the source's
+	// own scale; google_rating, the default source, is 0..5) into 0..1.
+	bayesianScale = 5.0
 	// photosFullCredit is the photo count at/above which photos score 1.0.
 	photosFullCredit = 3
+
+	bayesianSourceLemon = "lemon_score"
 )
 
-// signalDistance implements the literal distance formula: closer is higher,
-// capped at 30 miles. A candidate with no location arrives with DistanceKM set
-// to a value ≥ the cap (or +Inf) by retrieval, which naturally floors to 0.
-func signalDistance(c *domain.Candidate) float64 {
+// signalDistance dispatches to the configured distance formula. Both formulas
+// return 0..1; a candidate with no location arrives with DistanceKM ≥ the cap
+// (or +Inf) from retrieval, which floors both to 0.
+func signalDistance(c *domain.Candidate, cfg *config.Ranking) float64 {
+	if cfg.SignalFormulas.Distance == distanceDecayMode {
+		return distanceDecay(c, cfg)
+	}
 	return math.Max(1-c.DistanceKM/distanceCapKM, 0)
 }
 
-// signalRating is lemon_score/10, demoted by the new-business factor when the
-// candidate is new. A nil lemon_score scores 0.
+// distanceDecay is per-archetype exponential decay: exp(-d / decay_km[arch]).
+// A missing or non-positive decay constant falls back to the literal cap so a
+// misconfigured archetype degrades gracefully instead of dividing by zero.
+func distanceDecay(c *domain.Candidate, cfg *config.Ranking) float64 {
+	km := cfg.SignalFormulas.DistanceDecayKM[string(c.Archetype)]
+	if km <= 0 {
+		return math.Max(1-c.DistanceKM/distanceCapKM, 0)
+	}
+	return math.Exp(-c.DistanceKM / km)
+}
+
+// signalRating dispatches to the configured rating formula, then applies the
+// new-business demotion to whichever base value it produced.
 func signalRating(c *domain.Candidate, cfg *config.Ranking) float64 {
+	base := literalRating(c)
+	if cfg.SignalFormulas.Rating == ratingBayesianMode {
+		base = bayesianRating(c, cfg)
+	}
+	if c.IsNew {
+		return base * cfg.NewBusiness.RatingDemoteFactor
+	}
+	return base
+}
+
+// literalRating is the spec-literal lemon_score/10. A nil lemon_score scores 0.
+func literalRating(c *domain.Candidate) float64 {
 	if c.LemonScore == nil {
 		return 0
 	}
-	demote := 1.0
-	if c.IsNew {
-		demote = cfg.NewBusiness.RatingDemoteFactor
+	return *c.LemonScore / ratingScale
+}
+
+// bayesianRating smooths the rating source toward the global mean by review
+// count: ((C*m + n*r) / (C + n)) / scale. A nil source value scores 0.
+func bayesianRating(c *domain.Candidate, cfg *config.Ranking) float64 {
+	b := cfg.SignalFormulas.BayesianRating
+	r := c.GoogleRating
+	if b.Source == bayesianSourceLemon {
+		r = c.LemonScore
 	}
-	return (*c.LemonScore / ratingScale) * demote
+	if r == nil {
+		return 0
+	}
+	n := float64(c.GoogleReviewCount)
+	return ((b.PriorStrength*b.GlobalMean + n*(*r)) / (b.PriorStrength + n)) / bayesianScale
 }
 
 // signalPopularity is log-scaled review confidence normalized against a global
