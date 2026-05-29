@@ -77,7 +77,12 @@ func TestExtract(t *testing.T) {
 			},
 		},
 		{"accented non-lexicon term → zero", "Café", domain.Overlay{}},
-		{"real business name → zero (no false intent)", "joes barber shop", domain.Overlay{}},
+		{"real business name → zero (no false intent)", "rinconcito peruano", domain.Overlay{}},
+		{
+			"bare service word → subcategory pull",
+			"barber",
+			domain.Overlay{SubcategoryFilter: []string{"Barbershop"}},
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -89,7 +94,7 @@ func TestExtract(t *testing.T) {
 }
 
 func TestExtractIsZero(t *testing.T) {
-	if !Extract("joes barber shop").IsZero() {
+	if !Extract("rinconcito peruano").IsZero() {
 		t.Fatal("non-lexicon query should yield a zero overlay")
 	}
 	if Extract("cheap").IsZero() {

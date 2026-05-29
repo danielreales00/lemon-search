@@ -83,7 +83,7 @@ func TestE2EHealthReadinessVersion(t *testing.T) {
 
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	build := BuildInfo{Version: "e2e", Commit: "e2e", Date: "2026-05-28T00:00:00Z"}
-	srv := httptest.NewServer(New(log, pool, nil, nil, build).Handler())
+	srv := httptest.NewServer(New(log, pool, nil, nil, build, false).Handler())
 	defer srv.Close()
 	client := srv.Client()
 
@@ -118,7 +118,9 @@ func TestE2ESearch(t *testing.T) {
 
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	build := BuildInfo{Version: "e2e", Commit: "e2e", Date: "2026-05-28T00:00:00Z"}
-	srv := httptest.NewServer(New(log, pool, repo, cfg, build).Handler())
+	// Intent on here exercises the full Stage-3 path (extractor + categorical
+	// guard) end-to-end; "coffee" is categorical so the pin is suppressed.
+	srv := httptest.NewServer(New(log, pool, repo, cfg, build, true).Handler())
 	defer srv.Close()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

@@ -187,6 +187,66 @@ func TestExactNameBarePrefixDoesNotPin(t *testing.T) {
 	}
 }
 
+// TestExactNameHighCardinalityDoesNotPin guards the cardinality back-off: a name
+// shared by more than maxNameMatches businesses (the analog of "7-Eleven", 25+
+// locations) is not a unique business name, so even a perfect-coverage match
+// must NOT pin. We seed maxNameMatches+1 identically-named rows.
+func TestExactNameHighCardinalityDoesNotPin(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+	const sharedName = "ZZFIXTURE Shared Cardinality Name"
+	ids := seedShared(ctx, t, pool, sharedName, maxNameMatches+1)
+	t.Cleanup(pool.Close)
+	t.Cleanup(func() { deleteByIDs(context.Background(), t, pool, ids) })
+
+	repo, err := New(pool)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	_, found, err := repo.ExactName(ctx, sharedName)
+	if err != nil {
+		t.Fatalf("ExactName: %v", err)
+	}
+	if found {
+		t.Errorf("name shared by %d businesses pinned; cardinality back-off should suppress it", maxNameMatches+1)
+	}
+}
+
+// seedShared inserts n businesses that all share name, returning their ids. It
+// mirrors the main seed's loc/search_vector computation so the rows behave like
+// real ingested data for the trigram + lemon_name_match predicate.
+func seedShared(ctx context.Context, t *testing.T, pool *pgxpool.Pool, name string, n int) []uuid.UUID {
+	t.Helper()
+	const ins = `
+		insert into businesses (
+			id, name, category, subcategory, archetype, latitude, longitude,
+			lemon_score, google_rating, google_review_count, price_range,
+			hours, is_claimed, friend_count, loc, search_vector
+		) values (
+			$1, $2, 'Food & Drinks', 'Coffee', $3, 25.7620, -80.1925,
+			9.0, 4.5, 100, '$$',
+			null, false, 0,
+			ll_to_earth(25.7620, -80.1925),
+			setweight(to_tsvector('english', coalesce($2,'')), 'A')
+		)`
+	ids := make([]uuid.UUID, 0, n)
+	for i := 0; i < n; i++ {
+		id := uuid.New()
+		ids = append(ids, id)
+		if _, err := pool.Exec(ctx, ins, id, name, string(domain.ArchetypeLowStakesFastNearby)); err != nil {
+			t.Fatalf("seedShared %q #%d: %v", name, i, err)
+		}
+	}
+	return ids
+}
+
+func deleteByIDs(ctx context.Context, t *testing.T, pool *pgxpool.Pool, ids []uuid.UUID) {
+	t.Helper()
+	if _, err := pool.Exec(ctx, `delete from businesses where id = any($1)`, ids); err != nil {
+		t.Fatalf("deleteByIDs: %v", err)
+	}
+}
+
 func TestSearchDistanceNearVsFar(t *testing.T) {
 	pool, ctx := setup(t)
 

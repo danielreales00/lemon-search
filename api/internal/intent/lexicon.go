@@ -18,6 +18,7 @@ const (
 	catEvents  = "Events"
 	tagUpscale = "upscale"
 	tagFamily  = "family-friendly"
+	subNail    = "Nail Salon" // real subcategory, shared by "salon" and "nails"
 )
 
 // lexicon maps a normalized head term (unigram, or space-joined bigram) to its
@@ -68,14 +69,28 @@ var lexicon = map[string]rule{
 	"dog walker":       {subcategory: []string{"Walking"}},
 	"cleaner":          {subcategory: []string{"Cleaning"}},
 
+	// service domain (bare single-word subcategory terms; values verified
+	// against the businesses.subcategory column so the SQL filter matches).
+	"spa":     {subcategory: []string{"Spa"}},
+	"salon":   {subcategory: []string{"Hair Salon", subNail, "Beauty Salon"}},
+	"nails":   {subcategory: []string{subNail}},
+	"barber":  {subcategory: []string{"Barbershop"}},
+	"gym":     {subcategory: []string{"Gym"}},
+	"yoga":    {subcategory: []string{"Yoga"}},
+	"massage": {subcategory: []string{"Massage"}},
+	"tattoo":  {subcategory: []string{"Tattoo"}},
+	"bakery":  {category: catFood, subcategory: []string{"Bakery"}},
+
 	// food domain (direct specific_tag match)
 	"restaurant":  {category: catFood},
 	"restaurants": {category: catFood},
 	"sushi":       {category: catFood, specific: []string{"sushi"}},
+	"taco":        {category: catFood, specific: []string{"tacos"}},
 	"tacos":       {category: catFood, specific: []string{"tacos"}},
 	"coffee":      {category: catFood, specific: []string{"coffee"}},
 	"pizza":       {category: catFood, specific: []string{"pizza"}},
 	"burger":      {category: catFood, specific: []string{"burgers"}},
+	"burgers":     {category: catFood, specific: []string{"burgers"}},
 	"seafood":     {category: catFood, specific: []string{"seafood"}},
 	"vegan":       {category: catFood, specific: []string{"vegetarian", "vegan"}},
 	"cocktails":   {category: catFood, specific: []string{"cocktails"}},
