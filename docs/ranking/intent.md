@@ -29,8 +29,9 @@ type Overlay struct {
 }
 ```
 
-The Postgres adapter consumes this and adds equivalent clauses to the
-retrieval SQL. Empty fields are no-ops.
+The type lives in `domain` (`domain.Overlay`), not `intent` — see contract C5.
+The Postgres adapter consumes it and adds equivalent clauses to the retrieval
+SQL. Empty fields are no-ops.
 
 ## Tokenization
 
@@ -188,7 +189,7 @@ hits. Mentioned in writeup.
 
 ## Implementation notes
 
-- The lexicon is a static `map[string]EntryRule` in
+- The lexicon is a static `map[string]rule` in
   `api/internal/intent/lexicon.go`, frozen at startup.
 - The extractor is pure; given the same query string it returns the same
   `Overlay`. Easy to unit-test (table-driven).

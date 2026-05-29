@@ -123,12 +123,15 @@ JSON keys are `snake_case` (enforced by `tagliatelle`). Adding new fields is
 fine; renaming or removing requires a major version bump (we'll re-issue from
 `/v2/search`).
 
-## C5. `intent.Overlay` (locked Stage 3)
+## C5. `domain.Overlay` (locked Stage 3)
 
-Output of the intent extractor; input to the SQL retrieval call.
+Output of the intent extractor; input to the SQL retrieval call. It lives in
+`domain` (not `intent`) because the postgres adapter must consume it and
+arch-lint restricts `retrieve/postgres` to domain-only internal deps.
+`intent.Extract` returns it; the API threads it onto `domain.SearchOpts`.
 
 ```go
-// File: api/internal/intent/types.go
+// File: api/internal/domain/overlay.go
 
 type Overlay struct {
     CategoryFilter      *string     // e.g. "Food & Drinks"
