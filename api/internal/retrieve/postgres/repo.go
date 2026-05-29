@@ -106,7 +106,8 @@ func (r *Repo) Search(ctx context.Context, q string, opts domain.SearchOpts) ([]
 	defer cancel()
 
 	ov := opts.Overlay
-	rows, err := r.pool.Query(ctx, searchSQL,
+	rows, err := r.pool.Query(
+		ctx, searchSQL,
 		q, opts.Lat, opts.Lng, opts.Now, opts.Limit,
 		ov.CategoryFilter,
 		// nilToEmpty: a nil slice encodes as SQL NULL, where cardinality(NULL)=0
