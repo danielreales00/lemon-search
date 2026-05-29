@@ -1,6 +1,6 @@
 //go:build integration
 
-// These tests run against a LIVE Postgres with migrations 0001 + 0002 applied.
+// These tests run against a LIVE Postgres with migrations 0001 + 0002 + 0003 applied.
 // They are hermetic: they seed their own ZZFIXTURE rows, assert, and delete
 // them — they do NOT depend on any ingested data. Gated behind the
 // `integration` build tag so the default `go test ./...` needs no database.

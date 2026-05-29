@@ -1,0 +1,39 @@
+{
+  "$note": "Focused cluster to compare exact-name/typo MATCHERS (Postgres baseline vs option 2 coverage+levenshtein vs option 3 engine). exact_name/typo/prefix score pass@3 (>=1 expected name in top 3). over_fire passes iff the exact-name pin does NOT fire on a bare category word (the trap is a low-review name-collision). Ground truth is real Miami businesses confirmed in the DB.",
+  "user_location": { "lat": 25.7741728, "lng": -80.1937, "label": "Downtown Miami" },
+  "now_override": "2026-05-27T13:00:00-04:00",
+  "tests": [
+    { "kind": "exact_name", "q": "Rinconcito Peruano",    "expected_top_3": ["Rinconcito Peruano"] },
+    { "kind": "exact_name", "q": "sunny poke",            "expected_top_3": ["Sunny Poke"], "note": "lowercase variant" },
+    { "kind": "exact_name", "q": "Autentica Taqueria",    "expected_top_3": ["Autentica Taqueria"] },
+    { "kind": "exact_name", "q": "Monserrate Restaurant", "expected_top_3": ["Monserrate Restaurant"] },
+    { "kind": "exact_name", "q": "Island Grille",         "expected_top_3": ["Island Grille"] },
+
+    { "kind": "typo", "q": "rinconsito peruano",  "expected_top_3": ["Rinconcito Peruano"],    "note": "sim 0.73 (<0.85)" },
+    { "kind": "typo", "q": "sunny pok",           "expected_top_3": ["Sunny Poke"],            "note": "sim 0.75" },
+    { "kind": "typo", "q": "autentica taqueira",  "expected_top_3": ["Autentica Taqueria"],    "note": "transposed i/a" },
+    { "kind": "typo", "q": "iland grille",        "expected_top_3": ["Island Grille"],         "note": "dropped s" },
+    { "kind": "typo", "q": "la cantina bakary",   "expected_top_3": ["La Cantina Bakery"],     "note": "e->a" },
+    { "kind": "typo", "q": "club m2 myami",       "expected_top_3": ["Club M2 Miami"],         "note": "i->y" },
+    { "kind": "typo", "q": "monsrate restaurant", "expected_top_3": ["Monserrate Restaurant"], "note": "dropped er" },
+
+    { "kind": "over_fire", "q": "sushi",  "expected_top_3": [], "note": "trap: Sushi Tokio Team (1 review)" },
+    { "kind": "over_fire", "q": "pizza",  "expected_top_3": [], "note": "trap: Pizza Tropical (1 review)" },
+    { "kind": "over_fire", "q": "taco",   "expected_top_3": [], "note": "trap: TACO DADE (1 review)" },
+    { "kind": "over_fire", "q": "coffee", "expected_top_3": [], "note": "trap: Coffee To Go (13 reviews, closed)" },
+
+    { "kind": "accent",  "q": "benito juarez miami",    "expected_top_3": ["Benito Juárez Miami"],     "note": "accented name typed without accents" },
+    { "kind": "accent",  "q": "cafe bea",               "expected_top_3": ["Café Bea"] },
+    { "kind": "accent",  "q": "senor pan cafe kendall", "expected_top_3": ["Señor Pan Café Kendall"] },
+    { "kind": "accent",  "q": "mochima bistro miami",   "expected_top_3": ["Mochima Bistró Miami"] },
+    { "kind": "accent",  "q": "italica pizza bar",      "expected_top_3": ["Itálica Pizza Bar"] },
+
+    { "kind": "chain",   "q": "winn dixie",             "expected_top_3": ["Winn-Dixie"], "note": "hyphenated chain, 13 locations" },
+
+    { "kind": "partial", "q": "sapore di mare",         "expected_top_3": ["Sapore di Mare Italian Seafood - Coconut Grove"], "note": "distinctive partial of a long name; coverage may reject" },
+    { "kind": "partial", "q": "barkbus dog grooming",   "expected_top_3": ["Barkbus Mobile Dog Grooming - Miami Beach"] },
+
+    { "kind": "typo",    "q": "autentica takeria",      "expected_top_3": ["Autentica Taqueria"], "note": "severe: q->k + drop u" },
+    { "kind": "typo",    "q": "monserrate restaraunt",  "expected_top_3": ["Monserrate Restaurant"], "note": "transposed letters" }
+  ]
+}

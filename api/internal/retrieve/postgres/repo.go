@@ -18,9 +18,11 @@ import (
 // correct regardless of how the pool was configured.
 const queryTO = time.Second
 
-// exactNameThreshold is the fixed trigram similarity at/above which a name
-// counts as an exact-name hit (Stage 2). See docs/ranking/semantics.md §"pin".
-const exactNameThreshold = 0.85
+// nameMatchCoverage is the minimum name-token coverage (from lemon_name_match)
+// at/above which a query counts as an exact-name hit. Coverage decouples typos
+// (per-word levenshtein) from how much of the name the query spans. See
+// docs/ranking/semantics.md §"Exact-name pin".
+const nameMatchCoverage = 0.8
 
 // candidateColumns is the projection shared by the search and exact-name
 // queries: it matches the search_candidates() RETURNS TABLE order 1:1 so a
@@ -37,10 +39,10 @@ const searchSQL = `
 	select ` + candidateColumns + `
 	from search_candidates($1, $2, $3, $4, $5, null, null, null, null, false)`
 
-// exactNameSQL is the separate exact-name path: 0–1 rows, ordered by name
-// similarity. It pins ONLY on high trigram similarity (no bare ILIKE prefix),
-// so generic category words ("coffee", "sushi") can't hijack the pin —
-// prefix/partial recall is search_candidates' job (ranked, not pinned). See
+// exactNameSQL is the separate exact-name path: 0–1 rows. A trigram GIN
+// pre-filter (name % $1) narrows candidates cheaply, then lemon_name_match
+// scores token coverage + per-word edit distance and pins only when the query
+// spans the name — so typo'd full names pin while category prefixes don't. See
 // docs/ranking/semantics.md §"Exact-name pin". It carries no user location
 // (the pin ignores distance), so distance_km is the ∞ sentinel and open-status
 // uses wall-clock now() for display only.
@@ -61,8 +63,8 @@ const exactNameSQL = `
 	from businesses b
 	cross join lateral lemon_open_status(
 		b.hours, (now() at time zone 'America/New_York')::timestamp) os
-	where similarity(b.name, $1) >= $2
-	order by similarity(b.name, $1) desc, b.id
+	where b.name % $1 and lemon_name_match($1, b.name) >= $2
+	order by lemon_name_match($1, b.name) desc, b.id
 	limit 1`
 
 // Repo is the Supabase Postgres adapter implementing domain.BusinessRepo. It
@@ -108,14 +110,14 @@ func (r *Repo) Search(ctx context.Context, q string, opts domain.SearchOpts) ([]
 	return out, nil
 }
 
-// ExactName returns at most one candidate whose name matches q at or above the
-// 0.85 trigram similarity threshold. found=false (with a nil error) means no
-// pin — not an error.
+// ExactName returns at most one candidate whose name matches q with token
+// coverage at or above nameMatchCoverage (per-word typo-tolerant). found=false
+// (with a nil error) means no pin — not an error.
 func (r *Repo) ExactName(ctx context.Context, q string) (c domain.Candidate, found bool, err error) {
 	ctx, cancel := context.WithTimeout(ctx, queryTO)
 	defer cancel()
 
-	rows, err := r.pool.Query(ctx, exactNameSQL, q, exactNameThreshold)
+	rows, err := r.pool.Query(ctx, exactNameSQL, q, nameMatchCoverage)
 	if err != nil {
 		return domain.Candidate{}, false, fmt.Errorf("exact-name query: %w", err)
 	}
