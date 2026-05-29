@@ -55,6 +55,7 @@ The only ranked-search endpoint. Returns up to 15 ranked businesses.
   ],
   "timings": {
     "intent_ms":  0,
+    "embed_ms":   0,
     "sql_ms":    18,
     "rerank_ms":  3,
     "total_ms":  27
@@ -66,7 +67,9 @@ Notes:
 
 - All keys are `snake_case` (enforced by `tagliatelle`).
 - `results` is always an array, even when empty. Never `null`.
-- `timings.total_ms` includes `intent_ms + sql_ms + rerank_ms` + small
+- `embed_ms` is the query-embed time for the semantic recall channel
+  (`LEMON_FF_SEMANTIC`); `0` when the flag is off (no embedding).
+- `timings.total_ms` includes `intent_ms + embed_ms + sql_ms + rerank_ms` + small
   bookkeeping; bench assertion is `total_ms ≥ sum of stages`.
 - `score = +Inf` is serialized as a large finite number (`1e308`) when an
   exact-name hard-pin fires. Clients should treat any score ≥ 1e6 as

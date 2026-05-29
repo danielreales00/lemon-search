@@ -71,6 +71,7 @@ flag where needed.
 |---|---|---|---|---|---|
 | `LEMON_FF_INTENT` | api | Gate the intent extractor while the lexicon is incomplete (Stage 3) | `false` | — | Stage 3 lexicon complete + bench ≥80% |
 | `NEXT_PUBLIC_FF_INTENT` | web | Show intent-derived UI hints (e.g., "showing open now") | `false` | — | Same as above |
+| `LEMON_FF_SEMANTIC` | api | Gate the embedding-backed vector recall channel while it's measured against the latency gate (ADR-0006, E4/E5) | `false` | — | E5 bench clears the recall-lift + sub-100ms p95 gate |
 
 _(Add rows as flags are introduced. Empty until the first flagged feature lands.)_
 

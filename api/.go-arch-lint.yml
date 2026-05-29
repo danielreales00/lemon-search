@@ -131,9 +131,11 @@ deps:
     mayDependOn: [domain, search, rank, observ, config, retrieve-postgres]
     canUse: [net-http]
 
-  # cmd-api: composition root for the server
+  # cmd-api: composition root for the server. Also constructs the Ollama query
+  # embedder (embed-ollama) for semantic recall when LEMON_FF_SEMANTIC is on
+  # (ADR-0006, E4) and injects it into the search service via the domain port.
   cmd-api:
-    mayDependOn: [domain, api, search, intent, rank, config, observ, flags, retrieve-postgres]
+    mayDependOn: [domain, api, search, intent, rank, config, observ, flags, retrieve-postgres, embed-ollama]
     canUse: [net-http, pgx, pgxpool, yaml]
 
   # cmd-ingest: ingestion CLI. Also the composition root for the embedding pass

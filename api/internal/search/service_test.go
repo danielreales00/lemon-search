@@ -55,7 +55,31 @@ func loadConfig(t *testing.T) *config.Ranking {
 func newService(t *testing.T, repo domain.BusinessRepo, intentEnabled bool) *Service {
 	t.Helper()
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	return New(log, repo, loadConfig(t), intentEnabled)
+	return New(log, repo, loadConfig(t), intentEnabled, nil)
+}
+
+func newSemanticService(t *testing.T, repo domain.BusinessRepo, emb domain.Embedder) *Service {
+	t.Helper()
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	return New(log, repo, loadConfig(t), false, emb)
+}
+
+// fakeEmbedder is a domain.Embedder stub for service tests: it records how often
+// Embed was called and returns a fixed vector (or an error). EmbedBatch is unused
+// here (the query path uses Embed only).
+type fakeEmbedder struct {
+	vec   []float32
+	err   error
+	calls int
+}
+
+func (f *fakeEmbedder) Embed(_ context.Context, _ string) ([]float32, error) {
+	f.calls++
+	return f.vec, f.err
+}
+
+func (f *fakeEmbedder) EmbedBatch(_ context.Context, _ []string) ([][]float32, error) {
+	return nil, errors.New("EmbedBatch not used in query path")
 }
 
 func openCandidate(name string) domain.Candidate {
@@ -168,6 +192,59 @@ func TestServiceTimingsPopulated(t *testing.T) {
 	}
 	if timings.SQLMS < 0 || timings.RerankMS < 0 || timings.IntentMS < 0 {
 		t.Fatalf("timings must be non-negative, got %+v", timings)
+	}
+}
+
+// With a wired embedder (LEMON_FF_SEMANTIC on) the query is embedded and the
+// vector is threaded onto the retrieval SearchOpts for the semantic channel.
+func TestServiceEmbedsQueryWhenSemanticOn(t *testing.T) {
+	repo := &fakeRepo{candidates: []domain.Candidate{openCandidate("Panther Coffee")}}
+	emb := &fakeEmbedder{vec: []float32{0.1, 0.2, 0.3}}
+	svc := newSemanticService(t, repo, emb)
+
+	_, _, err := svc.Search(context.Background(), "chill place to work", domain.SearchOpts{})
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if emb.calls != 1 {
+		t.Fatalf("embedder called %d times, want 1", emb.calls)
+	}
+	if len(repo.gotOpts.QueryVec) != 3 {
+		t.Fatalf("QueryVec not threaded onto retrieval, got %v", repo.gotOpts.QueryVec)
+	}
+}
+
+// With no embedder (the default / flag off) no embedding happens and the vector
+// stays nil, so retrieval is purely lexical and embed time is zero.
+func TestServiceNoEmbedWhenSemanticOff(t *testing.T) {
+	repo := &fakeRepo{candidates: []domain.Candidate{openCandidate("Panther Coffee")}}
+	svc := newService(t, repo, false) // nil embedder
+
+	_, timings, err := svc.Search(context.Background(), "chill place to work", domain.SearchOpts{})
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if repo.gotOpts.QueryVec != nil {
+		t.Fatalf("QueryVec must be nil with semantic off, got %v", repo.gotOpts.QueryVec)
+	}
+	if timings.EmbedMS != 0 {
+		t.Fatalf("embed_ms must be 0 with semantic off, got %d", timings.EmbedMS)
+	}
+}
+
+// A failing embedder must degrade to lexical recall (nil vector), not fail the
+// search — a flaky embedder should never take search down.
+func TestServiceEmbedErrorDegradesToLexical(t *testing.T) {
+	repo := &fakeRepo{candidates: []domain.Candidate{openCandidate("Panther Coffee")}}
+	emb := &fakeEmbedder{err: errors.New("ollama down")}
+	svc := newSemanticService(t, repo, emb)
+
+	_, _, err := svc.Search(context.Background(), "chill place to work", domain.SearchOpts{})
+	if err != nil {
+		t.Fatalf("Search must succeed despite embed failure, got %v", err)
+	}
+	if repo.gotOpts.QueryVec != nil {
+		t.Fatalf("QueryVec must be nil after embed failure, got %v", repo.gotOpts.QueryVec)
 	}
 }
 

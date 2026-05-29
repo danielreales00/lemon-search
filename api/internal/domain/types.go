@@ -57,4 +57,8 @@ type SearchOpts struct {
 	Limit    int
 	Now      time.Time
 	Overlay  Overlay
+	// QueryVec is the query embedding for semantic recall (ADR-0006, E4). nil —
+	// the default and the case whenever LEMON_FF_SEMANTIC is off — means no
+	// vector channel: retrieval is purely lexical, byte-identical to before.
+	QueryVec []float32
 }

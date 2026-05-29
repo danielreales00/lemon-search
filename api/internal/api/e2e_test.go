@@ -121,7 +121,7 @@ func TestE2ESearch(t *testing.T) {
 	build := BuildInfo{Version: "e2e", Commit: "e2e", Date: "2026-05-28T00:00:00Z"}
 	// Intent on here exercises the full Stage-3 path (extractor + categorical
 	// guard) end-to-end; "coffee" is categorical so the pin is suppressed.
-	svc := search.New(log, repo, cfg, true)
+	svc := search.New(log, repo, cfg, true, nil)
 	srv := httptest.NewServer(New(log, pool, svc, build).Handler())
 	defer srv.Close()
 

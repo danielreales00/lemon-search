@@ -202,7 +202,7 @@ func runSingle(ctx context.Context, cfg *config.Ranking, repo domain.BusinessRep
 		return err
 	}
 	applyMode(cfg, m)
-	svc := search.New(benchLogger(), repo, cfg, true)
+	svc := search.New(benchLogger(), repo, cfg, true, nil)
 	results := rankAll(ctx, svc, bf, now)
 	report(fmt.Sprintf("%s formula=%s", o.label, m.name), len(results), results)
 	return nil
@@ -221,7 +221,7 @@ func runComparison(ctx context.Context, cfg *config.Ranking, repo domain.Busines
 	runs := make([]modeRun, 0, len(modes))
 	for _, m := range modes {
 		applyMode(cfg, m)
-		svc := search.New(benchLogger(), repo, cfg, true)
+		svc := search.New(benchLogger(), repo, cfg, true, nil)
 		runs = append(runs, modeRun{mode: m, results: rankAll(ctx, svc, bf, now)})
 	}
 	if err := writeComparison(o.reportOut, o.generate, o.seed, runs); err != nil {
