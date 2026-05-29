@@ -282,13 +282,6 @@ func cleanup(ctx context.Context, t *testing.T, pool *pgxpool.Pool, ids []uuid.U
 	}
 }
 
-func derefStr(s *string) string {
-	if s == nil {
-		return ""
-	}
-	return *s
-}
-
 func ptrOrNil(s string) *string {
 	if s == "" {
 		return nil
