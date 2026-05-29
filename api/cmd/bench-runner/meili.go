@@ -29,7 +29,9 @@ const (
 	meiliIndex        = "businesses"
 	meiliCoverage     = 0.8
 	coverageTokenFrac = 0.8
-	exactNameProbe    = 10
+	exactNameProbe    = 50
+	meiliOneTypo      = 3
+	meiliTwoTypos     = 7
 	distSentinel      = 1e9
 	earthRadiusKM     = 6371.0
 	degToRad          = math.Pi / 180
@@ -182,7 +184,7 @@ type meiliSearchResp struct {
 
 func (c *meiliClient) search(ctx context.Context, q string, limit int) ([]meiliDoc, error) {
 	var r meiliSearchResp
-	body := map[string]any{"q": q, "limit": limit}
+	body := map[string]any{"q": q, "limit": limit, "matchingStrategy": "frequency"}
 	if err := c.do(ctx, http.MethodPost, "/indexes/"+meiliIndex+"/search", body, &r); err != nil {
 		return nil, err
 	}
@@ -239,7 +241,12 @@ func indexBusinesses(ctx context.Context, pool *pgxpool.Pool, c *meiliClient) (i
 			return 0, err
 		}
 	}
-	settings := map[string]any{"searchableAttributes": []string{"name", "subcategory", "category"}}
+	settings := map[string]any{
+		"searchableAttributes": []string{"name", "subcategory", "category"},
+		"typoTolerance": map[string]any{
+			"minWordSizeForTypos": map[string]any{"oneTypo": meiliOneTypo, "twoTypos": meiliTwoTypos},
+		},
+	}
 	if err := c.do(ctx, http.MethodPatch, "/indexes/"+meiliIndex+"/settings", settings, &t); err != nil {
 		return 0, fmt.Errorf("configure settings: %w", err)
 	}

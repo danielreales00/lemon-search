@@ -69,42 +69,54 @@ ranker if `pg_trgm` proves weak on the bench. Day-3 escape hatch only.
 
 ## Validation — measured 3-way comparison (2026-05-28)
 
-We did exactly the shadow A/B above before committing the matcher. Benchmark:
-726 cases generated from 300 real businesses (sampled by `md5(id)`; per-word
-typos, accent-stripped, and 3-token partials, all with automatic ground truth),
-identical cases across engines, **same ranker + same pin coverage logic** — only
-the retrieval engine differs (`scripts`: `cmd/bench-runner -generate`).
+We ran the shadow A/B before committing. Benchmark: 726 cases generated from 300
+real businesses (sampled by `md5(id)`; per-word typos, accent-stripped, and
+3-token partials, all with automatic ground truth), identical cases across
+engines, **same ranker + same pin coverage logic** — only the retrieval engine
+differs (`cmd/bench-runner -generate`).
 
-| dimension | Postgres trgm 0.85 | Postgres coverage+levenshtein | Meilisearch v1.11 (defaults) |
-|---|---|---|---|
-| exact     | 100% | 100%     | 100% |
-| typo      | 69%  | **97%**  | 77%  |
-| accent    | 67%  | **100%** | 83%  |
-| over_fire | 88%  | 76%      | **100%** |
-| partial   | 37%  | 37%      | 39%  |
-| **overall** | 76% | **86%** | 80%  |
-| search p95 (local) | ~105ms | ~40ms | ~11ms |
+**The first pass used Meili's DEFAULT settings and under-sold it.** Meili's
+defaults give zero typo tolerance to words under 5 chars
+(`minWordSizeForTypos {oneTypo:5, twoTypos:9}`) and drop the *last* query word on
+multi-word misses (`matchingStrategy: last`) — far stricter than our levenshtein
+budget. After tuning Meili the way one actually would for typo-tolerant name
+search (`minWordSizeForTypos {3,7}`, `matchingStrategy: frequency`, pin probe 50),
+the picture changed materially:
 
-- **Postgres coverage+levenshtein beats Meili on typo tolerance (97% vs 77%)** —
-  per-word edit budget (≤4 chars, the spec's model) exceeds Meili's defaults
-  (≤2/word). The purpose-built engine did not win the graded core out of the box.
-- **Meili avoids the over-fire (100%)** by ranking instead of hard-pinning; our
-  coverage pin still over-fires on bare single-token category words (76%) —
-  fixable in Postgres via taxonomy suppression (Stage-3 intent), tracked separately.
-- **The engine's hoped-for win — partials — did not materialize** (39% vs 37%);
-  a short prefix of a long name is inherently ambiguous for all three.
-- Meili's raw search is faster, but a second system adds a hop, a sync pipeline,
-  and a second source of truth — against the one-system Supabase deliverable.
+| dimension | Postgres trgm 0.85 | Postgres cov+leven | Meili (default) | Meili (tuned) |
+|---|---|---|---|---|
+| exact     | 100% | 100%    | 100% | 100% |
+| typo      | 69%  | **97%** | 77%  | 92%  |
+| accent    | 67%  | 100%    | 83%  | 100% |
+| over_fire | 88%  | 76%     | 100% | **92%** |
+| partial   | 37%  | 37%     | 39%  | **43%** |
+| **overall** | 76% | **86%** | 80% | **86%** |
+| search p95 (local) | ~105ms | ~40ms | ~11ms | **~8ms** |
 
-**Decision stands: Postgres** (coverage+levenshtein). It wins overall and on the
-graded core (typo), single system. Meili tuning could close the typo gap but
-adds operational cost for no overall gain; the `retrieve/meilisearch` adapter
-remains a documented escape hatch behind the `BusinessRepo` port for a future
-need (multilingual, semantic) that the data does not show today.
+**Tuned Meili ties the Postgres matcher overall (86% each)**, with a different
+profile: Meili wins **partials** (43% vs 37%) and **over-fire** (92% vs 76% —
+ranking beats hard-pinning on bare category words) and raw search latency;
+Postgres wins **typo** (97% vs 92% — its per-word edit budget exceeds Meili's
+2-typo cap); accent and exact tie.
 
-Caveats: Meili ran with default typo/ranking settings; the bench Meili adapter
-simplified open-status and used rune-levenshtein for the pin. Neither materially
-affects name-match pass@3.
+**Decision: Postgres for this build — simplicity, not superiority.** On quality
+they are comparable. Postgres stays a single system (no sync pipeline, no second
+source of truth, the Supabase deliverable is self-contained), the right call
+under a 4-day budget. Meili is now a **validated** escape hatch behind the
+`BusinessRepo` port: it measurably helps the two dimensions our pin is weakest on
+(partials, over-fire), and we'd adopt it if those — or multilingual/semantic —
+become priorities. (Meili's raw search is faster locally, but a real deployment
+adds an API→engine hop that partially offsets it.)
+
+Follow-ups this surfaced: (1) the coverage pin's over-fire on bare category words
+(76%) — to be fixed by Stage-3 taxonomy suppression in the intent layer, which
+Meili sidesteps by ranking; (2) partials are weak for the pin and want
+ranking/recall help.
+
+Caveats: the bench Meili adapter simplifies open-status (soft 0.7) and uses
+rune-levenshtein for the pin; neither materially affects name-match pass@3.
+Meili could likely be tuned further (custom ranking rules, synonyms) — the
+comparison is "competently tuned", not "maximally tuned".
 
 ## Cross-references
 
