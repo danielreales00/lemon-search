@@ -72,6 +72,31 @@ _One paragraph: what shipped, p95 latency, bench pass rate, biggest call._
   step — the recall SQL already accepts those params (passed NULL until wired).
 - Reference: [ranking/intent.md](ranking/intent.md).
 
+### Dense recall for open-vocabulary intent (V2, flag-gated)
+
+- The lexicon nails the spec's examples for free (`cheap restaurants` → price;
+  `i'm hungry` → category). It **can't scale to open-vocabulary vibe** queries —
+  `chill place to work`, `romantic dinner spot` — where every new vibe word would
+  need a hand-mapping. That's the one place a sentence-embedding recall channel
+  (ADR-0006) is load-bearing: it generalizes over the vibe vocabulary. It stays
+  **in retrieval, additive, flag-gated** (`LEMON_FF_SEMANTIC`), never an 8th
+  ranking signal (the spec's 7×archetype sum is untouched).
+- **One model, both sides — the call we made.** Cosine recall needs business and
+  query vectors in the same space, so a single model serves ingest *and* query;
+  there is no "big offline model + small online model" option (different models =
+  different spaces = noise). We keep `all-MiniLM-L6-v2` (384d) because it is the
+  only choice that embeds a query in-process **per keystroke (~5–10ms)** and holds
+  the sub-100ms p95 gate — a heavier long-context model (~40–80ms) would not, and
+  its only gain (more `about` tail) doesn't move vibe recall, since the vibe
+  signal (tags + lead sentences) is front-loaded inside MiniLM's 256-token window.
+  Any upgrade is gated on the E5 recall-vs-latency bench.
+- **Bug found + fixed.** The first ingest pass capped embed-text at 1000 *chars*,
+  but the model limit is 256 *tokens*, and Ollama 400s the *whole batch* if any
+  input overflows — so one dense row poisoned its page and only 1,472/22,568 rows
+  embedded. Caught by a coverage check; fixed by lowering the cap to 512 runes
+  (corpus-verified to clear the ceiling — zero 400s across all rows) and
+  re-embedding (#100).
+
 ## Bench results
 
 ### Search quality by mode (Stage 3, measured)

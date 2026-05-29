@@ -3,14 +3,17 @@ package ingest
 import "strings"
 
 // maxEmbedChars caps the composed embed text. all-MiniLM-L6-v2 truncates input
-// at 256 word-pieces, and Ollama's /api/embed rejects the whole batch with a 400
-// ("input length exceeds the context length") if any single input is too long.
-// 1000 runes sits safely under that ceiling (empirically the cutoff is ~1100–
-// 1200 chars for this corpus) while keeping the full text for ~98.5% of rows
-// (p99 ≈ 1087). Because the salient identifying signal — name, category,
-// subcategory, tags — is composed first, only the tail of a long `about` is
-// dropped, which the model would have truncated anyway.
-const maxEmbedChars = 1000
+// at 256 word-pieces, and Ollama's /api/embed rejects the WHOLE batch with a 400
+// ("input length exceeds the context length") if any single input overflows —
+// so one dense row poisons its entire EmbedBatch page. Char count is a poor
+// proxy for token count: dense text (hyphenated tags + menu prose) blows past
+// 256 tokens well under 1000 chars, which is why the first ingest pass 400'd and
+// left ~21k rows unembedded. 512 runes is the verified-safe cap — a corpus-wide
+// stress test (all 22,568 rows, embedded individually) found zero 400s at 512,
+// covering the worst case of ~2 chars/token. Because the salient identifying
+// signal — name, category, subcategory, tags — is composed first, a tighter cap
+// only drops the tail of a long `about`, which the model would truncate anyway.
+const maxEmbedChars = 512
 
 // EmbedText composes the single string fed to the sentence-embedding model for a
 // business (ADR-0006: embeddings are computed from name + category + subcategory
