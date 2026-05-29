@@ -51,6 +51,8 @@ components:
     in: internal/ingest/**
   retrieve-postgres:
     in: internal/retrieve/postgres/**
+  embed-ollama:
+    in: internal/retrieve/embed/ollama/**
   cmd-api:
     in: cmd/api/**
   cmd-ingest:
@@ -112,6 +114,13 @@ deps:
   retrieve-postgres:
     mayDependOn: [domain]
     canUse: [pgx, pgxpool]
+
+  # embed-ollama: semantic-embedding adapter. Localhost-HTTP to Ollama (ADR-0006);
+  # stdlib-only (net/http), sees domain types only — no DB, no other infra.
+  embed-ollama:
+    mayDependOn: [domain]
+    canUse: [net-http]
+    anyVendorDeps: false
 
   # api: thin HTTP transport. Production code imports only domain, search, and
   # rank (verify: grep the non-test files) — intent/config/DB now live behind the
