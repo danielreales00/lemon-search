@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"fmt"
 	"math"
 	"net/http"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/danielreales00/lemon-search/api/internal/domain"
+	"github.com/danielreales00/lemon-search/api/internal/intent"
 	"github.com/danielreales00/lemon-search/api/internal/rank"
 )
 
@@ -57,8 +59,8 @@ type searchTimings struct {
 	TotalMS  int64 `json:"total_ms"`
 }
 
-// handleSearch runs intent (no-op at Stage 2) → retrieval → re-rank and encodes
-// the top results with per-stage timings.
+// handleSearch runs intent (flag-gated) → retrieval → re-rank and encodes the
+// top results with per-stage timings.
 func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	if s.repo == nil || s.cfg == nil {
@@ -87,6 +89,8 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := r.Context()
+	intentMS, categorical := s.runIntent(ctx, q)
+
 	sqlStart := time.Now()
 	candidates, err := s.repo.Search(ctx, q, domain.SearchOpts{Lat: lat, Lng: lng, Now: now, Limit: candidateLimit})
 	if err != nil {
@@ -102,8 +106,10 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	}
 	sqlMS := sinceMS(sqlStart)
 
+	// A categorical query (e.g. "coffee", "spa") names a category, not one
+	// business, so suppress the pin even when a literally-named business matched.
 	var pinPtr *domain.Candidate
-	if found {
+	if found && !categorical {
 		pinPtr = &pin
 	}
 
@@ -120,12 +126,31 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		resp.Results = append(resp.Results, toResult(&ranked[i]))
 	}
 	resp.Timings = searchTimings{
-		IntentMS: 0, // intent extraction lands in Stage 3
+		IntentMS: intentMS,
 		SQLMS:    sqlMS,
 		RerankMS: rerankMS,
 		TotalMS:  sinceMS(start),
 	}
 	s.writeJSON(w, http.StatusOK, resp)
+}
+
+// runIntent runs the flag-gated intent extractor and reports the time spent and
+// whether the query is categorical (used to suppress the exact-name pin). With
+// the flag off it is a no-op — zero time, not categorical — so the search path
+// behaves exactly as it did before the extractor was wired in. The extracted
+// overlay's filter fields are not threaded into retrieval yet (a later issue);
+// only the categorical guard is consumed now.
+func (s *Server) runIntent(ctx context.Context, q string) (intentMS int64, categorical bool) {
+	if !s.intentEnabled {
+		return 0, false
+	}
+	intentStart := time.Now()
+	overlay := intent.Extract(q)
+	categorical = intent.IsCategorical(q)
+	intentMS = sinceMS(intentStart)
+	s.log.DebugContext(ctx, "intent extracted",
+		"q", q, "categorical", categorical, "overlay_zero", overlay.IsZero())
+	return intentMS, categorical
 }
 
 // toResult maps a ranked result onto the C4 DTO. The exact-name pin carries a

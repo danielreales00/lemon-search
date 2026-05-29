@@ -24,6 +24,13 @@ const queryTO = time.Second
 // docs/ranking/semantics.md §"Exact-name pin".
 const nameMatchCoverage = 0.8
 
+// maxNameMatches caps how many businesses may share a name before the
+// exact-name pin backs off. A name matched by more than this many rows (e.g.
+// "7-Eleven", shared by 25+ locations) is not a unique business name, so pinning
+// an arbitrary one of them over-fires; ExactName returns found=false instead.
+// The count comes from the same query via a window over the match predicate.
+const maxNameMatches = 5
+
 // candidateColumns is the projection shared by the search and exact-name
 // queries: it matches the search_candidates() RETURNS TABLE order 1:1 so a
 // single scanCandidate handles both paths.
@@ -46,6 +53,10 @@ const searchSQL = `
 // docs/ranking/semantics.md §"Exact-name pin". It carries no user location
 // (the pin ignores distance), so distance_km is the ∞ sentinel and open-status
 // uses wall-clock now() for display only.
+//
+// match_count is count(*) over () — the number of businesses matching the same
+// predicate, computed before LIMIT — so ExactName can back off when a name is
+// shared by many locations (see maxNameMatches).
 const exactNameSQL = `
 	select
 		b.id, b.name, b.category, b.subcategory, b.archetype, b.neighborhood,
@@ -59,7 +70,8 @@ const exactNameSQL = `
 		os.is_open_now, coalesce(os.opens_later, false) as opens_later,
 		b.hours,
 		0::float8 as text_score,
-		similarity(b.name, $1)::float8 as name_trigram
+		similarity(b.name, $1)::float8 as name_trigram,
+		count(*) over () as match_count
 	from businesses b
 	cross join lateral lemon_open_status(
 		b.hours, (now() at time zone 'America/New_York')::timestamp) os
@@ -112,7 +124,9 @@ func (r *Repo) Search(ctx context.Context, q string, opts domain.SearchOpts) ([]
 
 // ExactName returns at most one candidate whose name matches q with token
 // coverage at or above nameMatchCoverage (per-word typo-tolerant). found=false
-// (with a nil error) means no pin — not an error.
+// (with a nil error) means no pin — not an error. When the name is shared by
+// more than maxNameMatches businesses it is ambiguous (not a unique name), so
+// the pin backs off too.
 func (r *Repo) ExactName(ctx context.Context, q string) (c domain.Candidate, found bool, err error) {
 	ctx, cancel := context.WithTimeout(ctx, queryTO)
 	defer cancel()
@@ -130,31 +144,47 @@ func (r *Repo) ExactName(ctx context.Context, q string) (c domain.Candidate, fou
 		return domain.Candidate{}, false, nil
 	}
 
-	c, err = scanCandidate(rows)
-	if err != nil {
-		return domain.Candidate{}, false, err
+	var matchCount int64
+	cand, archetype, hours := newCandidate()
+	if err = rows.Scan(append(candidateScanDests(cand, archetype, hours), &matchCount)...); err != nil {
+		return domain.Candidate{}, false, fmt.Errorf("scanning exact-name candidate: %w", err)
 	}
 	if err = rows.Err(); err != nil {
 		return domain.Candidate{}, false, fmt.Errorf("exact-name rows: %w", err)
 	}
-	return c, true, nil
+	if matchCount > maxNameMatches {
+		return domain.Candidate{}, false, nil
+	}
+	return finishCandidate(cand, archetype, hours), true, nil
 }
 
 // scanCandidate maps one row of candidateColumns into a domain.Candidate.
 // Nullable source columns scan into pointer fields; archetype/hours are
 // converted from their wire types.
 func scanCandidate(rows pgx.Rows) (domain.Candidate, error) {
-	var (
-		c         domain.Candidate
-		archetype string
-		hours     []byte
-	)
-	if err := rows.Scan(
+	c, archetype, hours := newCandidate()
+	if err := rows.Scan(candidateScanDests(c, archetype, hours)...); err != nil {
+		return domain.Candidate{}, fmt.Errorf("scanning candidate: %w", err)
+	}
+	return finishCandidate(c, archetype, hours), nil
+}
+
+// newCandidate allocates a candidate plus the two wire-typed sidecars
+// (archetype string, hours bytes) that candidateScanDests / finishCandidate use.
+func newCandidate() (c *domain.Candidate, archetype *string, hours *[]byte) {
+	return &domain.Candidate{}, new(string), new([]byte)
+}
+
+// candidateScanDests returns the Scan destinations for the candidateColumns
+// projection, in order. Both the search and exact-name paths use it so the
+// 21-column scan lives in one place (the exact-name path appends match_count).
+func candidateScanDests(c *domain.Candidate, archetype *string, hours *[]byte) []any {
+	return []any{
 		&c.ID,
 		&c.Name,
 		&c.Category,
 		&c.Subcategory,
-		&archetype,
+		archetype,
 		&c.Neighborhood,
 		&c.DistanceKM,
 		&c.LemonScore,
@@ -168,15 +198,18 @@ func scanCandidate(rows pgx.Rows) (domain.Candidate, error) {
 		&c.IsNew,
 		&c.IsOpenNow,
 		&c.OpensLater,
-		&hours,
+		hours,
 		&c.TextScore,
 		&c.NameTrigram,
-	); err != nil {
-		return domain.Candidate{}, fmt.Errorf("scanning candidate: %w", err)
 	}
-	c.Archetype = domain.Archetype(archetype)
-	if hours != nil {
-		c.Hours = json.RawMessage(hours)
+}
+
+// finishCandidate converts the wire-typed sidecars onto c after a successful
+// scan and returns the value.
+func finishCandidate(c *domain.Candidate, archetype *string, hours *[]byte) domain.Candidate {
+	c.Archetype = domain.Archetype(*archetype)
+	if *hours != nil {
+		c.Hours = json.RawMessage(*hours)
 	}
-	return c, nil
+	return *c
 }

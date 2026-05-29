@@ -25,6 +25,7 @@ import (
 	"github.com/danielreales00/lemon-search/api/internal/api"
 	"github.com/danielreales00/lemon-search/api/internal/config"
 	"github.com/danielreales00/lemon-search/api/internal/domain"
+	"github.com/danielreales00/lemon-search/api/internal/flags"
 	"github.com/danielreales00/lemon-search/api/internal/observ"
 	pgrepo "github.com/danielreales00/lemon-search/api/internal/retrieve/postgres"
 )
@@ -73,11 +74,12 @@ func run(ctx context.Context, logger *slog.Logger) error {
 	}
 
 	cfg := loadRanking(logger, os.Getenv("LEMON_RANKING_CONFIG"))
+	ff := flags.FromEnv()
 
 	build := api.BuildInfo{Version: version, Commit: commit, Date: date}
 	srv := &http.Server{
 		Addr:              addr(),
-		Handler:           api.New(logger, pinger, repo, cfg, build).Handler(),
+		Handler:           api.New(logger, pinger, repo, cfg, build, ff.Intent).Handler(),
 		ReadHeaderTimeout: readHeaderTO,
 	}
 

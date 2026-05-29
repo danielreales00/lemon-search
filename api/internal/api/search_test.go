@@ -52,9 +52,14 @@ func loadTestConfig(t *testing.T) *config.Ranking {
 
 func newSearchServer(t *testing.T, repo domain.BusinessRepo, cfg *config.Ranking) http.Handler {
 	t.Helper()
+	return newSearchServerFF(t, repo, cfg, false)
+}
+
+func newSearchServerFF(t *testing.T, repo domain.BusinessRepo, cfg *config.Ranking, intentEnabled bool) http.Handler {
+	t.Helper()
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	build := BuildInfo{Version: "test", Commit: "test", Date: "2026-05-28T00:00:00Z"}
-	return New(log, fakePinger{}, repo, cfg, build).Handler()
+	return New(log, fakePinger{}, repo, cfg, build, intentEnabled).Handler()
 }
 
 func decodeSearch(t *testing.T, rec *httptest.ResponseRecorder) searchResponse {
@@ -166,6 +171,60 @@ func TestSearchExactNamePinIsFirstWithFiniteScore(t *testing.T) {
 	}
 	if sr.Results[0].Score != 1.0 {
 		t.Fatalf("pinned +Inf score must surface as 1.0, got %v", sr.Results[0].Score)
+	}
+}
+
+// With intent on, a categorical query ("coffee") must NOT pin the
+// literally-named business — the categorical guard suppresses it.
+func TestSearchIntentSuppressesPinForCategoryWord(t *testing.T) {
+	pin := openCandidate("Coffee")
+	repo := fakeRepo{
+		candidates: []domain.Candidate{openCandidate("Panther Coffee"), openCandidate("Bean There")},
+		pin:        &pin,
+	}
+	h := newSearchServerFF(t, repo, loadTestConfig(t), true)
+	rec := doGet(t, h, "/search?q=coffee")
+	sr := decodeSearch(t, rec)
+	for _, r := range sr.Results {
+		if r.ID == pin.ID.String() {
+			t.Fatalf("categorical query pinned %q; the guard should suppress it", r.Name)
+		}
+	}
+	for _, r := range sr.Results {
+		if r.Score == 1.0 {
+			t.Fatalf("no result should carry the pinned 1.0 score for a categorical query")
+		}
+	}
+}
+
+// With intent on, a non-categorical query (a real business name) still pins.
+func TestSearchIntentKeepsPinForRealName(t *testing.T) {
+	pin := openCandidate("Joe's Barber Shop")
+	repo := fakeRepo{candidates: []domain.Candidate{openCandidate("Other Cafe")}, pin: &pin}
+	h := newSearchServerFF(t, repo, loadTestConfig(t), true)
+	rec := doGet(t, h, "/search?q=joes+barber+shop")
+	sr := decodeSearch(t, rec)
+	if sr.Results[0].ID != pin.ID.String() {
+		t.Fatalf("non-categorical name must still pin first, got %q", sr.Results[0].Name)
+	}
+	if sr.Timings.IntentMS < 0 {
+		t.Fatalf("intent_ms must be non-negative, got %d", sr.Timings.IntentMS)
+	}
+}
+
+// With intent OFF, behavior is exactly as before: even a category word pins
+// (the guard is gated by the flag).
+func TestSearchPinFiresForCategoryWordWhenIntentOff(t *testing.T) {
+	pin := openCandidate("Coffee")
+	repo := fakeRepo{candidates: []domain.Candidate{openCandidate("Panther Coffee")}, pin: &pin}
+	h := newSearchServer(t, repo, loadTestConfig(t)) // flag off
+	rec := doGet(t, h, "/search?q=coffee")
+	sr := decodeSearch(t, rec)
+	if sr.Results[0].ID != pin.ID.String() {
+		t.Fatalf("with intent off the pin must fire as before, got %q", sr.Results[0].Name)
+	}
+	if sr.Timings.IntentMS != 0 {
+		t.Fatalf("with intent off intent_ms must be 0, got %d", sr.Timings.IntentMS)
 	}
 }
 

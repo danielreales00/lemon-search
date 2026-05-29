@@ -32,18 +32,21 @@ type BuildInfo struct {
 
 // Server holds the HTTP dependencies and exposes the routed handler.
 type Server struct {
-	log    *slog.Logger
-	pinger Pinger
-	repo   domain.BusinessRepo
-	cfg    *config.Ranking
-	build  BuildInfo
+	log           *slog.Logger
+	pinger        Pinger
+	repo          domain.BusinessRepo
+	cfg           *config.Ranking
+	build         BuildInfo
+	intentEnabled bool
 }
 
 // New wires the HTTP server dependencies. It accepts interfaces and returns a
 // concrete *Server; callers obtain the routed handler via Handler. repo and cfg
 // may be nil — /search then reports 503, while the health endpoints still work.
-func New(log *slog.Logger, pinger Pinger, repo domain.BusinessRepo, cfg *config.Ranking, build BuildInfo) *Server {
-	return &Server{log: log, pinger: pinger, repo: repo, cfg: cfg, build: build}
+// intentEnabled gates the intent extractor (LEMON_FF_INTENT); when false the
+// search path behaves exactly as it did before the extractor was wired in.
+func New(log *slog.Logger, pinger Pinger, repo domain.BusinessRepo, cfg *config.Ranking, build BuildInfo, intentEnabled bool) *Server {
+	return &Server{log: log, pinger: pinger, repo: repo, cfg: cfg, build: build, intentEnabled: intentEnabled}
 }
 
 // Handler returns the fully routed http.Handler with request logging applied.

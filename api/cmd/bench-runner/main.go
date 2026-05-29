@@ -29,6 +29,7 @@ import (
 
 	"github.com/danielreales00/lemon-search/api/internal/config"
 	"github.com/danielreales00/lemon-search/api/internal/domain"
+	"github.com/danielreales00/lemon-search/api/internal/intent"
 	"github.com/danielreales00/lemon-search/api/internal/rank"
 	pgrepo "github.com/danielreales00/lemon-search/api/internal/retrieve/postgres"
 )
@@ -301,8 +302,12 @@ func evalTest(ctx context.Context, repo domain.BusinessRepo, cfg *config.Ranking
 	if err != nil {
 		return result{kind: t.Kind, q: t.Q, err: fmt.Errorf("exactname: %w", err)}
 	}
+	// Mirror the handler's feature-ON behavior unconditionally: a categorical
+	// query (e.g. "coffee") suppresses the pin even when a literally-named
+	// business matched. The cardinality back-off already happened in ExactName.
+	pinFired := found && !intent.IsCategorical(t.Q)
 	var pinPtr *domain.Candidate
-	if found {
+	if pinFired {
 		pinPtr = &pin
 	}
 	ro := o
@@ -317,7 +322,7 @@ func evalTest(ctx context.Context, repo domain.BusinessRepo, cfg *config.Ranking
 	if len(ranked) > 0 {
 		top1 = ranked[0].Candidate.Name
 	}
-	return result{kind: t.Kind, q: t.Q, top1: top1, pass: score(t, ranked, found), pinFired: found, ms: ms}
+	return result{kind: t.Kind, q: t.Q, top1: top1, pass: score(t, ranked, pinFired), pinFired: pinFired, ms: ms}
 }
 
 // score: over_fire passes iff the pin did NOT fire; else pass@3 on expected.
