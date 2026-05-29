@@ -55,10 +55,46 @@ _One paragraph: what shipped, p95 latency, bench pass rate, biggest call._
 
 ## Smart semantic intent
 
-- Lexicon-driven, no LLM, no embeddings. Sub-millisecond extractor.
+- `intent.Extract(q) → domain.Overlay` — a **pure**, lexicon-driven extractor.
+  No LLM, no embeddings; sub-millisecond (the lexicon is a static Go map frozen
+  at startup). A diacritic-stripping tokenizer (`café` → `cafe`) feeds
+  unigram + bigram lookups against six families: price (`cheap`, `fancy`),
+  time (`open now`, `brunch`), audience (`date night`, `kid friendly`), setting
+  (`rooftop`, `quiet`), domain pulls (`wedding`, `tow`), and food
+  (`sushi`, `tacos`). Matching entries merge additively into the `Overlay`.
+- **Flag-gated behind `LEMON_FF_INTENT`** while the lexicon is still partial —
+  with the flag off the search path behaves exactly as it did before.
+- It **narrows retrieval, never overrides archetype** (decision D6): archetype
+  stays a per-business property; intent only filters the candidate set.
+- Today the wired consumer is the **categorical guard** (`intent.IsCategorical`)
+  that suppresses the exact-name pin for category queries (see below). Threading
+  the overlay's category/tag/price filters into `search_candidates` is the next
+  step — the recall SQL already accepts those params (passed NULL until wired).
 - Reference: [ranking/intent.md](ranking/intent.md).
 
 ## Bench results
+
+### Search quality by mode (Stage 3, measured)
+
+Generated set: 300 businesses, seed 42, 726 cases, full
+Search + ExactName + rank pipeline (local). These are the day-3 numbers after
+the over-fire hybrid landed; the Day-4 table below sweeps the ranking-formula
+switches against the same harness.
+
+| Mode | Pass rate | Notes |
+|---|---|---|
+| over_fire | **76% → 100%** (25/25) | after the hybrid pin fix (was 76%) |
+| typo | **97%** (254/261) | held — no regression from the pin change |
+| accent | **100%** | diacritic-stripping tokenizer |
+| exact_name | **100%** | unique-name pins land |
+| partial | **37%** (49/134) | **unchanged** — the standing weak spot |
+| **overall** | **87%** (633/726) | latency p95 ≈ 26 ms local |
+
+Read: the hybrid closed the over-fire gap (the spec-faithfulness fix below)
+without costing typo recall, and partial-name matching is the next lever — it
+is a recall/ranking gap the over-fire work deliberately did not touch.
+
+### Ranking-mode sweep
 
 _Filled on Day 4 from `bench/results-final.md`._
 
@@ -99,23 +135,33 @@ deployed `/search` endpoint with a query pool simulating one-keystroke-per-RPS.
 - **Archetype assignment** — strictly per-business via category mapping.
   Intent extraction does *not* override archetype; it only narrows
   retrieval. (See ranking decision D6.)
-- **Exact-name "boost" vs. category-aware matching** — the spec lists these as
-  *separate* behaviors with deliberate verbs: a name "returns that business
-  first, **regardless** of other ranking signals" (a hard override) vs. a prefix
-  "**surfaces**" a match (rank, don't override). Our first pass pinned on
-  `name ILIKE q || '%'`, which conflated them — `coffee` pinned "Coffee To Go",
-  `sushi` pinned "Sushi Joe" over far better results, though both are *category*
-  leaves in the taxonomy (Café→Coffee Shop, Casual/Fast→Sushi). **The deeper
-  tension:** trigram similarity can't separate a typo'd *full name* from a
-  *category prefix* — measured, the spec's own `joes barbr shop → Joe's Barber
-  Shop` scores **0.57**, the same band as the false positives (`coffee` 0.54,
-  `sushi` 0.60), so *no single threshold separates them*. Since the pin is a
-  max-cost override (a false positive is catastrophic; a false negative merely
-  demotes a still-ranked result), we took the **high-precision call**: pin only
-  on `similarity ≥ 0.85` (dropped the bare prefix clause). The real
-  discriminator is name *coverage* + *taxonomy membership*, deferred to the
-  Stage-3 intent layer (where the pin also folds into main retrieval for real
-  distance + one fewer round-trip).
+- **Exact-name "boost" vs. category-aware matching — RESOLVED (Stage 3).** The
+  spec lists these as *separate* behaviors with deliberate verbs: a name
+  "returns that business first, **regardless** of other ranking signals" (a hard
+  override) vs. a prefix "**surfaces**" a match (rank, don't override). Our first
+  pass pinned on `name ILIKE q || '%'`, which conflated them — `coffee` pinned
+  "Coffee To Go", `sushi` pinned "Sushi Joe" over far better results, though both
+  are *category* leaves in the taxonomy (Café→Coffee Shop, Casual/Fast→Sushi).
+  **The deeper tension:** trigram similarity can't separate a typo'd *full name*
+  from a *category prefix* — measured, the spec's own `joes barbr shop → Joe's
+  Barber Shop` scores **0.57**, the same band as the false positives
+  (`coffee` 0.54, `sushi` 0.60), so *no single threshold separates them*.
+  Stage 2 took a conservative high-precision stopgap (pin only on
+  `similarity ≥ 0.85`). **Stage 3 resolved it with a hybrid** that stops relying
+  on one similarity number and layers three orthogonal conditions:
+  (1) a **coverage** matcher (`lemon_name_match`, token coverage + per-word
+  Levenshtein, ≥ 0.8) that asks "does the query span most of the *full name*?",
+  so a typo'd full name pins but a category word does not;
+  (2) a **cardinality back-off** (always on) — no pin when > 5 businesses share
+  the matched name, since an ambiguous name like "7-Eleven" is not a unique
+  business; and
+  (3) **categorical suppression** (flag-gated, `LEMON_FF_INTENT`) — no pin when
+  the whole query is category/cuisine/domain terms (`intent.IsCategorical`), so
+  `coffee`/`spa` rank instead of pinning, while `joes barbr shop` still pins.
+  Measured: `over_fire` **76% → 100%** (25/25) with typo held at **97%** (no
+  regression). Detail: [ranking/semantics.md](ranking/semantics.md) §"Exact-name
+  pin". Folding the pin into main retrieval (real distance, one fewer
+  round-trip) waits on the overlay being threaded through `search_candidates`.
 - **Rubric says 4 archetypes, body lists 6** — we implemented 6 per the body.
 
 ## What's broken / known gaps
@@ -131,11 +177,20 @@ deployed `/search` endpoint with a query pool simulating one-keystroke-per-RPS.
 - **~3% non-Miami records dropped** at ingestion (including Versailles, FR).
 - **Friend signal denormalized** as `friend_count` on `businesses`. Real
   multi-user Lemon needs a per-user join.
-- **Exact-name pin is conservative (Stage 2)** — pins only near-identical names
-  (`similarity ≥ 0.85`); typo'd full names like "joes barbr shop" currently fall
-  through to normal ranking (still surfaced, just not hard-pinned) rather than
-  risk pinning category words. Proper coverage + taxonomy-suppressed pin is
-  Stage-3 intent work.
+- **Partial-name matching is weak — 37%** (49/134), unchanged through Stage 3.
+  Partial-name queries (a fragment of a real name, not a typo of the whole
+  name) are a recall + ranking gap; the over-fire hybrid deliberately did not
+  touch them (it tightened the *pin*, not recall). This is the next quality
+  lever — see "another week" below.
+- **Bayesian rating divides by 5**, correct for the default `google_rating`
+  (0–5) source. The opt-in `source: lemon_score` (0–10) path is **not yet
+  scale-corrected** — it would need a ÷10 normalizer. Default config (literal
+  `lemon_score / 10`) is unaffected; this only bites if you flip both the
+  formula *and* the source.
+- **Overlay filters not yet threaded into retrieval** — `intent.Extract`
+  produces a full `Overlay`, but only the categorical guard is consumed today;
+  the category/tag/price filters are logged, not yet applied to
+  `search_candidates`. Next step (the SQL already accepts the params).
 - **No diversity (MMR)** — coffee chains can clump near the top of `coffee`.
 - **No personalization** — no learning loop, no per-user history.
 
