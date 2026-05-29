@@ -20,6 +20,15 @@
 drop function if exists search_candidates(
   text, float8, float8, timestamptz, int, text[], text, text[], text[], boolean
 );
+-- Also drop this migration's OWN (11-arg) signature before recreating. A later
+-- migration (0005) changes the return type, and `create or replace` cannot
+-- change a return type — so on a second full apply (CI idempotency check) this
+-- create would fail against 0005's already-trimmed function. Dropping first
+-- makes the recreate unconditional. (Editing a merged migration is acceptable
+-- here: nothing is deployed, so no durable DB has run the old form.)
+drop function if exists search_candidates(
+  text, float8, float8, timestamptz, int, text, text[], text[], text[], text[], boolean
+);
 
 create or replace function search_candidates(
   q              text,
