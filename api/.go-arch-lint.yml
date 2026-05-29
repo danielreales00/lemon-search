@@ -147,7 +147,8 @@ deps:
 
   # cmd-bench-runner: in-process bench harness; wires repo + config into the
   # search service (intent ON) so the bench measures the feature-ON path. Talks
-  # to Meilisearch over its REST API (net/http) for the engine A/B.
+  # to Meilisearch over its REST API (net/http) for the engine A/B, and builds the
+  # Ollama embedder (embed-ollama) for the E5 semantic ON-vs-OFF go/no-go bench.
   cmd-bench-runner:
-    mayDependOn: [domain, config, rank, search, retrieve-postgres]
+    mayDependOn: [domain, config, rank, search, retrieve-postgres, embed-ollama]
     canUse: [pgx, pgxpool, net-http]

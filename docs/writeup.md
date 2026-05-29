@@ -96,6 +96,17 @@ _One paragraph: what shipped, p95 latency, bench pass rate, biggest call._
   embedded. Caught by a coverage check; fixed by lowering the cap to 512 runes
   (corpus-verified to clear the ceiling — zero 400s across all rows) and
   re-embedding (#100).
+- **Measured — it clears the go/no-go gate (E5).** On 24 hand-labeled NL/vibe
+  queries, semantic recall lifts pass@3 from **50% → 88% (+38pp), 0 regressions**,
+  for **~15–25ms** of query-embed (ON engine p95 **~40ms**, under the 60ms local
+  budget that leaves room for ~30–40ms network toward the 100ms end-to-end gate).
+  Vibe queries with no keyword hook — "chill place to work", "somewhere to get
+  pampered", "thinking about getting some ink" — flip from miss to hit; lexical
+  controls don't regress. Full table: `bench/semantic-results-2026-05-29.md`. The
+  three residual misses are ground-truth labeling edges (e.g. "Naked Farmer"
+  categorized generically), not recall failures. Recommendation: graduate toward
+  default-on + the in-process ONNX runtime (E6) so it ships without the Ollama
+  sidecar.
 
 ## Bench results
 

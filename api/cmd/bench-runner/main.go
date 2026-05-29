@@ -40,6 +40,7 @@ import (
 const (
 	defaultDB    = "postgres://postgres:postgres@localhost:54322/postgres?sslmode=disable"
 	topK         = 3
+	pctl50       = 50
 	pctl95       = 95
 	maxFailLines = 30
 
@@ -84,17 +85,20 @@ type result struct {
 }
 
 type opts struct {
-	benchPath string
-	cfgPath   string
-	label     string
-	generate  int
-	seed      int64
-	engine    string
-	formula   string
-	reportOut string
-	index     bool
-	meiliURL  string
-	meiliKey  string
+	benchPath     string
+	cfgPath       string
+	label         string
+	generate      int
+	seed          int64
+	engine        string
+	formula       string
+	reportOut     string
+	index         bool
+	meiliURL      string
+	meiliKey      string
+	semantic      bool
+	semanticBench string
+	semanticOut   string
 }
 
 // Ranking-formula modes selected by -formula. "all" sweeps the three below over
@@ -136,6 +140,9 @@ func main() {
 	flag.BoolVar(&o.index, "index", false, "index businesses into Meili, then exit")
 	flag.StringVar(&o.meiliURL, "meili-url", "http://localhost:7700", "Meilisearch base URL")
 	flag.StringVar(&o.meiliKey, "meili-key", "lemonbenchkey", "Meilisearch master key")
+	flag.BoolVar(&o.semantic, "semantic", false, "run the semantic go/no-go bench (LEMON_FF_SEMANTIC on vs off) and exit")
+	flag.StringVar(&o.semanticBench, "semantic-bench", "../bench/semantic-cluster.json", "hand-labeled NL query set for -semantic")
+	flag.StringVar(&o.semanticOut, "semantic-out", "../bench/semantic-results-2026-05-29.md", "markdown path for the -semantic report")
 	flag.Parse()
 
 	if err := run(o); err != nil {
@@ -173,6 +180,13 @@ func run(o opts) error {
 	if err != nil {
 		return err
 	}
+
+	// The semantic go/no-go bench (E5) has its own NL query set and ON-vs-OFF
+	// retrieval comparison, so it dispatches before the name-matching set is built.
+	if o.semantic {
+		return runSemantic(ctx, cfg, repo, o)
+	}
+
 	bf, err := buildBench(ctx, pool, o)
 	if err != nil {
 		return err
