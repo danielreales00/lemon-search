@@ -308,7 +308,118 @@ func TestSearchHoursPassthrough(t *testing.T) {
 	}
 }
 
+// TestSearchZeroOverlayParity is the core invariant: an explicit zero Overlay
+// must return byte-identical candidates (same rows, same order) to passing no
+// overlay at all. This guards the LEMON_FF_INTENT-off and bench-runner paths,
+// which never set an overlay.
+func TestSearchZeroOverlayParity(t *testing.T) {
+	pool, ctx := setup(t)
+
+	base := mustSearch(ctx, t, pool, "ZZFIXTURE")
+	withZero := mustSearchOverlay(ctx, t, pool, "ZZFIXTURE", domain.Overlay{})
+	if len(base) != len(withZero) {
+		t.Fatalf("zero overlay changed result count: base=%d zero=%d", len(base), len(withZero))
+	}
+	for i := range base {
+		if base[i].ID != withZero[i].ID {
+			t.Fatalf("zero overlay reordered/changed row %d: base=%s zero=%s", i, base[i].ID, withZero[i].ID)
+		}
+	}
+}
+
+// TestSearchOverlayCategoryNarrows: a CategoryFilter keeps only that category.
+// The two Food & Drinks sushi rows survive; the Beauty barber/spa drop.
+func TestSearchOverlayCategoryNarrows(t *testing.T) {
+	pool, ctx := setup(t)
+
+	food := "Food & Drinks"
+	got := fixtureNames(mustSearchOverlay(ctx, t, pool, "ZZFIXTURE", domain.Overlay{CategoryFilter: &food}))
+	assertFixtureSet(t, got,
+		[]string{"ZZFIXTURE Sushi Near", "ZZFIXTURE Sushi Far"},
+		[]string{"ZZFIXTURE Closed Barber", "ZZFIXTURE Unknown Hours Spa"})
+}
+
+// TestSearchOverlaySubcategoryNarrows: SubcategoryFilter is any-of over the
+// subcategory column.
+func TestSearchOverlaySubcategoryNarrows(t *testing.T) {
+	pool, ctx := setup(t)
+
+	got := fixtureNames(mustSearchOverlay(ctx, t, pool, "ZZFIXTURE",
+		domain.Overlay{SubcategoryFilter: []string{"Sushi"}}))
+	assertFixtureSet(t, got,
+		[]string{"ZZFIXTURE Sushi Near", "ZZFIXTURE Sushi Far"},
+		[]string{"ZZFIXTURE Closed Barber", "ZZFIXTURE Unknown Hours Spa"})
+}
+
+// TestSearchOverlayUniversalTagNarrows: UniversalTagFilter is array-overlap.
+// Only "Sushi Near" carries zzfixture-tag.
+func TestSearchOverlayUniversalTagNarrows(t *testing.T) {
+	pool, ctx := setup(t)
+
+	got := fixtureNames(mustSearchOverlay(ctx, t, pool, "ZZFIXTURE",
+		domain.Overlay{UniversalTagFilter: []string{"zzfixture-tag"}}))
+	assertFixtureSet(t, got,
+		[]string{"ZZFIXTURE Sushi Near"},
+		[]string{"ZZFIXTURE Sushi Far", "ZZFIXTURE Closed Barber", "ZZFIXTURE Unknown Hours Spa"})
+}
+
+// TestSearchOverlayPriceNarrows: PriceFilter is any-of. The fixtures are all
+// '$$', so '$$' keeps them and '$$$' drops them — proving both the match and
+// the narrowing.
+func TestSearchOverlayPriceNarrows(t *testing.T) {
+	pool, ctx := setup(t)
+
+	all := []string{"ZZFIXTURE Sushi Near", "ZZFIXTURE Sushi Far", "ZZFIXTURE Closed Barber", "ZZFIXTURE Unknown Hours Spa"}
+
+	keep := fixtureNames(mustSearchOverlay(ctx, t, pool, "ZZFIXTURE", domain.Overlay{PriceFilter: []string{"$$"}}))
+	assertFixtureSet(t, keep, all, nil)
+
+	drop := fixtureNames(mustSearchOverlay(ctx, t, pool, "ZZFIXTURE", domain.Overlay{PriceFilter: []string{"$$$"}}))
+	assertFixtureSet(t, drop, nil, all)
+}
+
+// TestSearchOverlayRequireOpenNarrows: RequireOpenNow keeps only rows whose
+// is_open_now is TRUE at fixedNow (Mon 2pm). It drops definitively-closed AND
+// unknown-hours rows — preserving the function's pre-existing `is_open_now is
+// true` semantics. Only "Sushi Near" (open 9–9) survives.
+func TestSearchOverlayRequireOpenNarrows(t *testing.T) {
+	pool, ctx := setup(t)
+
+	got := fixtureNames(mustSearchOverlay(ctx, t, pool, "ZZFIXTURE", domain.Overlay{RequireOpenNow: true}))
+	assertFixtureSet(t, got,
+		[]string{"ZZFIXTURE Sushi Near"},
+		[]string{"ZZFIXTURE Sushi Far", "ZZFIXTURE Closed Barber", "ZZFIXTURE Unknown Hours Spa"})
+}
+
 // --- helpers ---
+
+// fixtureNames is the set of ZZFIXTURE-scoped result names (ignores any real
+// businesses the broad "ZZFIXTURE" trigram might also surface).
+func fixtureNames(cs []domain.Candidate) map[string]bool {
+	m := make(map[string]bool, len(cs))
+	for _, c := range cs {
+		if isFixture(c.Name) {
+			m[c.Name] = true
+		}
+	}
+	return m
+}
+
+// assertFixtureSet checks every name in want is present and every name in
+// notWant is absent from got.
+func assertFixtureSet(t *testing.T, got map[string]bool, want, notWant []string) {
+	t.Helper()
+	for _, n := range want {
+		if !got[n] {
+			t.Errorf("expected %q in narrowed results; got %v", n, keys(got))
+		}
+	}
+	for _, n := range notWant {
+		if got[n] {
+			t.Errorf("expected %q to be filtered out; got %v", n, keys(got))
+		}
+	}
+}
 
 func assertOpen(t *testing.T, byName map[string]domain.Candidate, name string, wantOpen *bool, wantLater bool) {
 	t.Helper()
@@ -362,13 +473,18 @@ func testPool(t *testing.T) *pgxpool.Pool {
 
 func mustSearch(ctx context.Context, t *testing.T, pool *pgxpool.Pool, q string) []domain.Candidate {
 	t.Helper()
+	return mustSearchOverlay(ctx, t, pool, q, domain.Overlay{})
+}
+
+func mustSearchOverlay(ctx context.Context, t *testing.T, pool *pgxpool.Pool, q string, ov domain.Overlay) []domain.Candidate {
+	t.Helper()
 	repo, err := New(pool)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	got, err := repo.Search(ctx, q, domain.SearchOpts{Lat: anchorLat, Lng: anchorLng, Limit: 150, Now: fixedNow})
+	got, err := repo.Search(ctx, q, domain.SearchOpts{Lat: anchorLat, Lng: anchorLng, Limit: 150, Now: fixedNow, Overlay: ov})
 	if err != nil {
-		t.Fatalf("Search(%q): %v", q, err)
+		t.Fatalf("Search(%q, %+v): %v", q, ov, err)
 	}
 	return got
 }

@@ -51,9 +51,12 @@ type Candidate struct {
 }
 
 // SearchOpts carries the per-request retrieval parameters. Now is injected so
-// is_open_now and bench runs are reproducible.
+// is_open_now and bench runs are reproducible. Overlay is the intent-derived
+// narrowing the adapter ANDs into the retrieval WHERE clause; the zero value is
+// a no-op (broad search) — see contract C5.
 type SearchOpts struct {
 	Lat, Lng float64
 	Limit    int
 	Now      time.Time
+	Overlay  Overlay
 }

@@ -41,6 +41,21 @@ func (f fakeRepo) ExactName(_ context.Context, _ string) (domain.Candidate, bool
 	return domain.Candidate{}, false, nil
 }
 
+// capturingRepo records the SearchOpts the handler passed to Search, so tests
+// can assert how (and whether) the intent overlay was threaded into retrieval.
+type capturingRepo struct {
+	gotOpts *domain.SearchOpts
+}
+
+func (r capturingRepo) Search(_ context.Context, _ string, opts domain.SearchOpts) ([]domain.Candidate, error) {
+	*r.gotOpts = opts
+	return nil, nil
+}
+
+func (r capturingRepo) ExactName(_ context.Context, _ string) (domain.Candidate, bool, error) {
+	return domain.Candidate{}, false, nil
+}
+
 func loadTestConfig(t *testing.T) *config.Ranking {
 	t.Helper()
 	cfg, err := config.LoadFile("../../../config/ranking.yaml")
@@ -243,5 +258,32 @@ func TestSearchExactNameErrorIs500(t *testing.T) {
 	rec := doGet(t, h, "/search?q=coffee")
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want 500", rec.Code)
+	}
+}
+
+// With intent on, the extracted overlay is threaded onto the retrieval
+// SearchOpts. "coffee" maps to category Food & Drinks + specific tag coffee.
+func TestSearchIntentThreadsOverlayWhenOn(t *testing.T) {
+	var got domain.SearchOpts
+	h := newSearchServerFF(t, capturingRepo{gotOpts: &got}, loadTestConfig(t), true)
+	doGet(t, h, "/search?q=coffee")
+
+	if got.Overlay.CategoryFilter == nil || *got.Overlay.CategoryFilter != "Food & Drinks" {
+		t.Fatalf("CategoryFilter = %v, want Food & Drinks", got.Overlay.CategoryFilter)
+	}
+	if len(got.Overlay.SpecificTagFilter) != 1 || got.Overlay.SpecificTagFilter[0] != "coffee" {
+		t.Fatalf("SpecificTagFilter = %v, want [coffee]", got.Overlay.SpecificTagFilter)
+	}
+}
+
+// With intent off, the retrieval SearchOpts overlay stays zero — preserving the
+// pre-extractor behavior (and the bench-runner path, which sends no overlay).
+func TestSearchIntentOverlayZeroWhenOff(t *testing.T) {
+	var got domain.SearchOpts
+	h := newSearchServer(t, capturingRepo{gotOpts: &got}, loadTestConfig(t)) // flag off
+	doGet(t, h, "/search?q=coffee")
+
+	if !got.Overlay.IsZero() {
+		t.Fatalf("overlay must be zero with intent off, got %+v", got.Overlay)
 	}
 }

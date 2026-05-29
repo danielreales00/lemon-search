@@ -89,10 +89,10 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := r.Context()
-	intentMS, categorical := s.runIntent(ctx, q)
+	intentMS, categorical, overlay := s.runIntent(ctx, q)
 
 	sqlStart := time.Now()
-	candidates, err := s.repo.Search(ctx, q, domain.SearchOpts{Lat: lat, Lng: lng, Now: now, Limit: candidateLimit})
+	candidates, err := s.repo.Search(ctx, q, domain.SearchOpts{Lat: lat, Lng: lng, Now: now, Limit: candidateLimit, Overlay: overlay})
 	if err != nil {
 		s.log.ErrorContext(ctx, "search retrieval failed", "err", err)
 		s.writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "search failed"})
@@ -134,23 +134,22 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	s.writeJSON(w, http.StatusOK, resp)
 }
 
-// runIntent runs the flag-gated intent extractor and reports the time spent and
-// whether the query is categorical (used to suppress the exact-name pin). With
-// the flag off it is a no-op — zero time, not categorical — so the search path
-// behaves exactly as it did before the extractor was wired in. The extracted
-// overlay's filter fields are not threaded into retrieval yet (a later issue);
-// only the categorical guard is consumed now.
-func (s *Server) runIntent(ctx context.Context, q string) (intentMS int64, categorical bool) {
+// runIntent runs the flag-gated intent extractor and reports the time spent,
+// whether the query is categorical (used to suppress the exact-name pin), and
+// the overlay (threaded into retrieval to narrow candidates). With the flag off
+// it is a no-op — zero time, not categorical, zero overlay — so the search path
+// behaves exactly as it did before the extractor was wired in.
+func (s *Server) runIntent(ctx context.Context, q string) (intentMS int64, categorical bool, overlay domain.Overlay) {
 	if !s.intentEnabled {
-		return 0, false
+		return 0, false, domain.Overlay{}
 	}
 	intentStart := time.Now()
-	overlay := intent.Extract(q)
+	overlay = intent.Extract(q)
 	categorical = intent.IsCategorical(q)
 	intentMS = sinceMS(intentStart)
 	s.log.DebugContext(ctx, "intent extracted",
 		"q", q, "categorical", categorical, "overlay_zero", overlay.IsZero())
-	return intentMS, categorical
+	return intentMS, categorical, overlay
 }
 
 // toResult maps a ranked result onto the C4 DTO. The exact-name pin carries a
