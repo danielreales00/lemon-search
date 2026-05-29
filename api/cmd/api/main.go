@@ -27,6 +27,7 @@ import (
 	"github.com/danielreales00/lemon-search/api/internal/domain"
 	"github.com/danielreales00/lemon-search/api/internal/flags"
 	"github.com/danielreales00/lemon-search/api/internal/observ"
+	ollama "github.com/danielreales00/lemon-search/api/internal/retrieve/embed/ollama"
 	pgrepo "github.com/danielreales00/lemon-search/api/internal/retrieve/postgres"
 	"github.com/danielreales00/lemon-search/api/internal/search"
 )
@@ -44,6 +45,8 @@ const (
 	shutdownTimeout    = 10 * time.Second
 	readHeaderTO       = 5 * time.Second
 	statementTO        = "1000" // ms; per-query Postgres statement_timeout (docs/api.md)
+	defaultOllamaURL   = "http://localhost:11434"
+	defaultOllamaModel = "all-minilm"
 )
 
 func main() {
@@ -81,7 +84,7 @@ func run(ctx context.Context, logger *slog.Logger) error {
 	// svc nil so /search reports 503 while the health endpoints keep working.
 	var svc *search.Service
 	if repo != nil && cfg != nil {
-		svc = search.New(logger, repo, cfg, ff.Intent)
+		svc = search.New(logger, repo, cfg, ff.Intent, semanticEmbedder(logger, ff.Semantic))
 	}
 
 	build := api.BuildInfo{Version: version, Commit: commit, Date: date}
@@ -117,6 +120,34 @@ func openPool(ctx context.Context, logger *slog.Logger, url string) (*pgxpool.Po
 		return nil, func() {}
 	}
 	return pool, pool.Close
+}
+
+// semanticEmbedder builds the query embedder for the semantic recall channel
+// when LEMON_FF_SEMANTIC is on (ADR-0006, E4). This is the only place the Ollama
+// adapter is constructed in the server. Off → nil (no embedder dependency, no
+// query embedding). A construction failure logs and returns nil so the server
+// still boots and search degrades to lexical-only rather than crashing.
+func semanticEmbedder(logger *slog.Logger, enabled bool) domain.Embedder {
+	if !enabled {
+		return nil
+	}
+	url := envOr("LEMON_OLLAMA_URL", defaultOllamaURL)
+	model := envOr("LEMON_OLLAMA_MODEL", defaultOllamaModel)
+	emb, err := ollama.New(url, nil, model)
+	if err != nil {
+		logger.Warn("LEMON_FF_SEMANTIC on but embedder build failed; semantic recall disabled",
+			slog.String("err", err.Error()))
+		return nil
+	}
+	logger.Info("semantic recall enabled", slog.String("ollama", url), slog.String("model", model))
+	return emb
+}
+
+func envOr(key, def string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return def
 }
 
 // loadRanking reads the ranking config from path (or the default when path is

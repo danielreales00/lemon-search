@@ -51,6 +51,7 @@ type searchResult struct {
 
 type searchTimings struct {
 	IntentMS int64 `json:"intent_ms"`
+	EmbedMS  int64 `json:"embed_ms"`
 	SQLMS    int64 `json:"sql_ms"`
 	RerankMS int64 `json:"rerank_ms"`
 	TotalMS  int64 `json:"total_ms"`
@@ -99,6 +100,7 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	}
 	resp.Timings = searchTimings{
 		IntentMS: timings.IntentMS,
+		EmbedMS:  timings.EmbedMS,
 		SQLMS:    timings.SQLMS,
 		RerankMS: timings.RerankMS,
 		TotalMS:  sinceMS(start),

@@ -28,6 +28,7 @@ export const contractSample = {
   ],
   timings: {
     intent_ms: 0,
+    embed_ms: 0,
     sql_ms: 18,
     rerank_ms: 3,
     total_ms: 27,

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"time"
 
 	pgx "github.com/jackc/pgx/v5"
@@ -41,12 +42,13 @@ const candidateColumns = `
 	is_new, is_open_now, opens_later, hours`
 
 // searchSQL invokes the retrieval function, threading the intent overlay
-// (contract C5) as bound params $6–$11. A zero overlay yields no-op params (nil
-// category, empty arrays, false require-open), so retrieval is unnarrowed and
-// the result is identical to passing no overlay at all.
+// (contract C5) as bound params $6–$11 and the optional query embedding as $12.
+// A zero overlay yields no-op params (nil category, empty arrays, false
+// require-open); a nil $12 (NULL::vector) disables the semantic channel — both
+// make retrieval identical to passing nothing.
 const searchSQL = `
 	select ` + candidateColumns + `
-	from search_candidates($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`
+	from search_candidates($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::vector)`
 
 // exactNameSQL is the separate exact-name path: 0–1 rows. A trigram GIN
 // pre-filter (name % $1) narrows candidates cheaply, then lemon_name_match
@@ -116,6 +118,9 @@ func (r *Repo) Search(ctx context.Context, q string, opts domain.SearchOpts) ([]
 		nilToEmpty(ov.SpecificTagFilter),
 		nilToEmpty(ov.PriceFilter),
 		ov.RequireOpenNow,
+		// vectorParam: nil query vec → NULL::vector → the semantic channel is a
+		// no-op (the nearest-neighbour subquery short-circuits to empty).
+		vectorParam(opts.QueryVec),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("search query: %w", err)
@@ -180,6 +185,27 @@ func nilToEmpty(s []string) []string {
 		return []string{}
 	}
 	return s
+}
+
+// vectorParam encodes a query embedding as a pgvector text literal ("[0.1,0.2]")
+// for the $12::vector bind, or returns nil (SQL NULL) when there is no vector —
+// which makes the semantic recall channel a no-op. pgx has no native pgvector
+// codec, so the text literal + cast is the registered path (mirrors the ingest
+// writer). 'g'/-1 is the shortest round-trippable form of each float32.
+func vectorParam(vec []float32) any {
+	if len(vec) == 0 {
+		return nil
+	}
+	buf := make([]byte, 0, len(vec)*12+2)
+	buf = append(buf, '[')
+	for i, v := range vec {
+		if i > 0 {
+			buf = append(buf, ',')
+		}
+		buf = strconv.AppendFloat(buf, float64(v), 'g', -1, 32)
+	}
+	buf = append(buf, ']')
+	return string(buf)
 }
 
 // scanCandidate maps one row of candidateColumns into a domain.Candidate.

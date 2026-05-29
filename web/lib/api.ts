@@ -21,6 +21,7 @@ export interface Business {
 
 interface SearchTimings {
   intent_ms: number;
+  embed_ms: number;
   sql_ms: number;
   rerank_ms: number;
   total_ms: number;

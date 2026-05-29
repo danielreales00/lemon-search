@@ -79,7 +79,7 @@ func newSearchServerFF(t *testing.T, repo domain.BusinessRepo, cfg *config.Ranki
 	// reports 503 (the unavailable-deps test relies on this).
 	var svc *search.Service
 	if repo != nil && cfg != nil {
-		svc = search.New(log, repo, cfg, intentEnabled)
+		svc = search.New(log, repo, cfg, intentEnabled, nil)
 	}
 	return New(log, fakePinger{}, svc, build).Handler()
 }

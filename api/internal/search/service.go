@@ -11,6 +11,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/danielreales00/lemon-search/api/internal/config"
@@ -30,6 +31,7 @@ const (
 // domain-side (no JSON tags): transport layers map it onto their own DTO.
 type Timings struct {
 	IntentMS int64
+	EmbedMS  int64
 	SQLMS    int64
 	RerankMS int64
 }
@@ -42,15 +44,18 @@ type Service struct {
 	repo          domain.BusinessRepo
 	cfg           *config.Ranking
 	intentEnabled bool
+	embedder      domain.Embedder
 }
 
 // New wires the search service. intentEnabled gates the intent extractor
 // (LEMON_FF_INTENT); when false the search path behaves exactly as it did
 // before the extractor was wired in (no intent, no overlay, pin fires on a
-// match). repo and cfg are required — callers that may lack them (a degraded
-// server) should not construct a Service.
-func New(log *slog.Logger, repo domain.BusinessRepo, cfg *config.Ranking, intentEnabled bool) *Service {
-	return &Service{log: log, repo: repo, cfg: cfg, intentEnabled: intentEnabled}
+// match). embedder gates semantic recall (LEMON_FF_SEMANTIC): nil means no
+// query embedding and purely lexical retrieval; the composition root passes a
+// non-nil embedder only when the flag is on. repo and cfg are required —
+// callers that may lack them (a degraded server) should not construct a Service.
+func New(log *slog.Logger, repo domain.BusinessRepo, cfg *config.Ranking, intentEnabled bool, embedder domain.Embedder) *Service {
+	return &Service{log: log, repo: repo, cfg: cfg, intentEnabled: intentEnabled, embedder: embedder}
 }
 
 // Search runs the full pipeline: flag-gated intent (extract overlay + detect a
@@ -64,10 +69,12 @@ func New(log *slog.Logger, repo domain.BusinessRepo, cfg *config.Ranking, intent
 // by the caller.
 func (s *Service) Search(ctx context.Context, q string, opts domain.SearchOpts) ([]rank.Result, Timings, error) {
 	intentMS, categorical, overlay := s.runIntent(ctx, q)
+	embedMS, queryVec := s.embedQuery(ctx, q)
 
 	retrieveOpts := opts
 	retrieveOpts.Limit = candidateLimit
 	retrieveOpts.Overlay = overlay
+	retrieveOpts.QueryVec = queryVec
 
 	sqlStart := time.Now()
 	candidates, err := s.repo.Search(ctx, q, retrieveOpts)
@@ -97,7 +104,26 @@ func (s *Service) Search(ctx context.Context, q string, opts domain.SearchOpts) 
 	}
 	rerankMS := sinceMS(rerankStart)
 
-	return ranked, Timings{IntentMS: intentMS, SQLMS: sqlMS, RerankMS: rerankMS}, nil
+	return ranked, Timings{IntentMS: intentMS, EmbedMS: embedMS, SQLMS: sqlMS, RerankMS: rerankMS}, nil
+}
+
+// embedQuery embeds q for semantic recall when an embedder is wired (the
+// LEMON_FF_SEMANTIC path). With no embedder — the default — it is a no-op: zero
+// time, nil vector, retrieval stays purely lexical. An embed error degrades to
+// lexical-only (logged, nil vector) rather than failing the whole search, so a
+// flaky embedder never takes search down.
+func (s *Service) embedQuery(ctx context.Context, q string) (embedMS int64, vec []float32) {
+	if s.embedder == nil || strings.TrimSpace(q) == "" {
+		return 0, nil
+	}
+	start := time.Now()
+	v, err := s.embedder.Embed(ctx, q)
+	embedMS = sinceMS(start)
+	if err != nil {
+		s.log.WarnContext(ctx, "query embed failed; falling back to lexical recall", "q", q, "err", err)
+		return embedMS, nil
+	}
+	return embedMS, v
 }
 
 // runIntent runs the flag-gated intent extractor and reports the time spent,

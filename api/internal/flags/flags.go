@@ -15,11 +15,18 @@ type Flags struct {
 	// Intent gates wiring the intent extractor into the search handler while the
 	// lexicon is still incomplete (LEMON_FF_INTENT). Default off.
 	Intent bool
+	// Semantic gates the embedding-backed vector recall channel (LEMON_FF_SEMANTIC)
+	// while it is measured against the latency gate (ADR-0006, E5). Default off;
+	// when off no query embedding is computed and retrieval is purely lexical.
+	Semantic bool
 }
 
 // FromEnv resolves the feature flags from the process environment.
 func FromEnv() Flags {
-	return Flags{Intent: truthy(os.Getenv("LEMON_FF_INTENT"))}
+	return Flags{
+		Intent:   truthy(os.Getenv("LEMON_FF_INTENT")),
+		Semantic: truthy(os.Getenv("LEMON_FF_SEMANTIC")),
+	}
 }
 
 // truthy reports whether v is a case-insensitive "1" or "true". Anything else

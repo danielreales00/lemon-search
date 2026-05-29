@@ -13,6 +13,8 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -391,6 +393,87 @@ func TestSearchOverlayRequireOpenNarrows(t *testing.T) {
 	assertFixtureSet(t, got,
 		[]string{"ZZFIXTURE Sushi Near", "ZZFIXTURE Unknown Hours Spa"},
 		[]string{"ZZFIXTURE Sushi Far", "ZZFIXTURE Closed Barber"})
+}
+
+// TestSearchSemanticChannelRecallsByVector proves the E4 vector channel: a row
+// that lexical recall misses (no name / tsvector / trigram / prefix match) is
+// surfaced when a query vector near its stored embedding is supplied, and stays
+// absent when no vector is passed. CI has Postgres but no Ollama, so we use the
+// row's OWN stored embedding as the query vector (nearest neighbour = itself) —
+// this exercises the SQL channel without an embedder.
+func TestSearchSemanticChannelRecallsByVector(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+	t.Cleanup(pool.Close)
+
+	id := uuid.MustParse("dddddddd-0000-0000-0000-0000000000aa")
+	const name = "ZZSEMANTIC Vectoronly Row"
+	vec := constVec(domain.EmbeddingDim, 0.1)
+	seedWithEmbedding(ctx, t, pool, id, name, vec)
+	t.Cleanup(func() { deleteByIDs(context.Background(), t, pool, []uuid.UUID{id}) })
+
+	repo, err := New(pool)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	// Gibberish query with no trigram overlap with the name → lexical miss.
+	const q = "qwopzxnonsenseplxvz"
+	base := domain.SearchOpts{Lat: anchorLat, Lng: anchorLng, Limit: 150, Now: fixedNow}
+
+	lexical, err := repo.Search(ctx, q, base)
+	if err != nil {
+		t.Fatalf("lexical Search: %v", err)
+	}
+	if candidateNames(lexical)[name] {
+		t.Fatalf("%q matched lexically; the query must be a true lexical miss", name)
+	}
+
+	withVec := base
+	withVec.QueryVec = vec
+	semantic, err := repo.Search(ctx, q, withVec)
+	if err != nil {
+		t.Fatalf("semantic Search: %v", err)
+	}
+	if !candidateNames(semantic)[name] {
+		t.Fatalf("semantic channel did not recall %q via its embedding", name)
+	}
+}
+
+func constVec(n int, v float32) []float32 {
+	out := make([]float32, n)
+	for i := range out {
+		out[i] = v
+	}
+	return out
+}
+
+func seedWithEmbedding(ctx context.Context, t *testing.T, pool *pgxpool.Pool, id uuid.UUID, name string, vec []float32) {
+	t.Helper()
+	const ins = `
+		insert into businesses (
+			id, name, category, subcategory, archetype, latitude, longitude,
+			lemon_score, google_rating, google_review_count, price_range,
+			hours, is_claimed, friend_count, loc, search_vector, embedding
+		) values (
+			$1, $2, 'Food & Drinks', 'Coffee', $3, 25.7620, -80.1925,
+			9.0, 4.5, 100, '$$',
+			null, false, 0,
+			ll_to_earth(25.7620, -80.1925),
+			setweight(to_tsvector('english', coalesce($2,'')), 'A'),
+			$4::vector
+		)`
+	if _, err := pool.Exec(ctx, ins, id, name, string(domain.ArchetypeLowStakesFastNearby), vecLiteral(vec)); err != nil {
+		t.Fatalf("seedWithEmbedding %q: %v", name, err)
+	}
+}
+
+func vecLiteral(vec []float32) string {
+	parts := make([]string, len(vec))
+	for i, v := range vec {
+		parts[i] = strconv.FormatFloat(float64(v), 'g', -1, 32)
+	}
+	return "[" + strings.Join(parts, ",") + "]"
 }
 
 // --- helpers ---
