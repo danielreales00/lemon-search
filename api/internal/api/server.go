@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/danielreales00/lemon-search/api/internal/search"
@@ -54,7 +55,29 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /healthz", s.handleHealthz)
 	mux.HandleFunc("GET /readyz", s.handleReadyz)
 	mux.HandleFunc("GET /version", s.handleVersion)
-	return s.logRequests(mux)
+	return s.withCORS(s.logRequests(mux))
+}
+
+// withCORS lets the browser-hosted web app (a different origin than the API:
+// Vercel → Fly in prod, :3001 → :8080 in dev) read responses. The allowed origin
+// is LEMON_CORS_ALLOW_ORIGIN (default "*"). Search is a simple GET, so browsers
+// skip preflight; the OPTIONS branch covers any preflight defensively.
+func (s *Server) withCORS(next http.Handler) http.Handler {
+	origin := os.Getenv("LEMON_CORS_ALLOW_ORIGIN")
+	if origin == "" {
+		origin = "*"
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", origin)
+		w.Header().Add("Vary", "Origin")
+		if r.Method == http.MethodOptions {
+			w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // logRequests emits one structured line per request with method, path, status,
