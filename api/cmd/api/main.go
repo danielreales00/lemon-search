@@ -17,6 +17,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -118,6 +119,13 @@ func openPool(ctx context.Context, logger *slog.Logger, url string) (*pgxpool.Po
 		return nil, func() {}
 	}
 	cfg.ConnConfig.RuntimeParams["statement_timeout"] = statementTO
+	// pgx defaults MaxConns to max(4, numCPU). That's a reasonable default; it's
+	// env-tunable for prod (a dedicated DB tolerates more) but left alone
+	// otherwise — measured: oversizing it against a single small Postgres just
+	// saturates it harder under load (the throughput, not the pool, is the limit).
+	if n := maxConnsOverride(); n > 0 {
+		cfg.MaxConns = n
+	}
 
 	pool, err := pgxpool.NewWithConfig(ctx, cfg)
 	if err != nil {
@@ -174,6 +182,14 @@ func envOr(key, def string) string {
 		return v
 	}
 	return def
+}
+
+// maxConnsOverride reads LEMON_DB_MAX_CONNS; 0 means "keep the pgx default".
+func maxConnsOverride() int32 {
+	if v, err := strconv.Atoi(os.Getenv("LEMON_DB_MAX_CONNS")); err == nil && v > 0 {
+		return int32(v) //nolint:gosec // small positive pool size
+	}
+	return 0
 }
 
 // loadRanking reads the ranking config from path (or the default when path is
