@@ -32,11 +32,13 @@ What did we choose, in one or two sentences?
 
 | # | Title | Status |
 |---|---|---|
-| 0001 | [Stack — Go on Fly + Supabase + Next.js on Vercel](0001-stack-choice.md) | Accepted |
+| 0001 | [Stack — Go on Fly + Supabase + Next.js on Vercel](0001-stack-choice.md) | Accepted (host → 0007) |
 | 0002 | [Search engine — Postgres `pg_trgm` + `tsvector`](0002-search-engine.md) | Accepted |
 | 0003 | [Ranking — two-phase, in-Go, config-driven](0003-ranking-strategy.md) | Accepted |
 | 0004 | [Spec-contract discipline — alternatives via config switch](0004-spec-contract-discipline.md) | Accepted |
 | 0005 | [Hexagonal core, light-touch](0005-hex-architecture.md) | Accepted |
+| 0006 | [Semantic retrieval — local embeddings + pgvector](0006-semantic-embeddings.md) | Accepted |
+| 0007 | [API host — AWS EC2 (`c7i.xlarge`, `us-east-1`)](0007-api-host-ec2.md) | Accepted |
 
 ## Adding a new ADR
 

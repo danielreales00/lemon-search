@@ -1,6 +1,6 @@
 # ADR-0001: Stack — Go API on Fly.io + Supabase Postgres + Next.js on Vercel
 
-- **Status**: Accepted
+- **Status**: Accepted — API host superseded by [ADR-0007](0007-api-host-ec2.md) (AWS EC2); Supabase + Vercel + Go stand.
 - **Date**: 2026-05-27
 - **Deciders**: Daniel
 
