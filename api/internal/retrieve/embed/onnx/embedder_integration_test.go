@@ -16,10 +16,12 @@ package onnx
 
 import (
 	"context"
+	"fmt"
 	"math"
 	"net/http"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -37,7 +39,7 @@ func TestONNXEmbedderParityWithOllama(t *testing.T) {
 	ctx := context.Background()
 	modelPath := modelPathOrSkip(t)
 
-	emb, err := New(ctx, modelPath, os.Getenv("LEMON_ONNX_RUNTIME_DIR"))
+	emb, err := New(ctx, modelPath, os.Getenv("LEMON_ONNX_RUNTIME_DIR"), 2)
 	if err != nil {
 		t.Fatalf("New(%s): %v", modelPath, err)
 	}
@@ -74,7 +76,7 @@ func TestONNXEmbedderParityWithOllama(t *testing.T) {
 
 func TestONNXEmbedBatchMatchesEmbed(t *testing.T) {
 	ctx := context.Background()
-	emb, err := New(ctx, modelPathOrSkip(t), os.Getenv("LEMON_ONNX_RUNTIME_DIR"))
+	emb, err := New(ctx, modelPathOrSkip(t), os.Getenv("LEMON_ONNX_RUNTIME_DIR"), 2)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -96,6 +98,47 @@ func TestONNXEmbedBatchMatchesEmbed(t *testing.T) {
 		if cos := cosine(batch[i], single); cos < 0.999 {
 			t.Errorf("batch[%d] vs single cosine = %.5f, want ≥ 0.999", i, cos)
 		}
+	}
+}
+
+// TestONNXEmbedderConcurrent hammers the pipeline pool from many goroutines at
+// once: it proves the pool is race-free (run with -race) and that a checked-out
+// pipeline returns the same vector under contention as it does single-threaded.
+func TestONNXEmbedderConcurrent(t *testing.T) {
+	ctx := context.Background()
+	emb, err := New(ctx, modelPathOrSkip(t), os.Getenv("LEMON_ONNX_RUNTIME_DIR"), 4)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	t.Cleanup(func() { _ = emb.Close() })
+
+	const text = "a relaxed coffee shop to work with wifi"
+	want, err := emb.Embed(ctx, text)
+	if err != nil {
+		t.Fatalf("Embed: %v", err)
+	}
+
+	const goroutines = 32
+	errs := make(chan error, goroutines)
+	var wg sync.WaitGroup
+	for i := 0; i < goroutines; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			got, err := emb.Embed(ctx, text)
+			if err != nil {
+				errs <- err
+				return
+			}
+			if cos := cosine(got, want); cos < 0.999 {
+				errs <- fmt.Errorf("concurrent embed cosine = %.5f, want ≥ 0.999", cos)
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
 	}
 }
 

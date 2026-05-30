@@ -152,7 +152,7 @@ func buildEmbedder(ctx context.Context, logger *slog.Logger, enabled bool) (doma
 	backend := envOr("LEMON_EMBED_BACKEND", defaultEmbedBackend)
 	if backend == "onnx" {
 		path := envOr("LEMON_ONNX_MODEL_PATH", defaultONNXModel)
-		emb, err := onnx.New(ctx, path, os.Getenv("LEMON_ONNX_RUNTIME_DIR"))
+		emb, err := onnx.New(ctx, path, os.Getenv("LEMON_ONNX_RUNTIME_DIR"), embedPoolSize())
 		if err != nil {
 			logger.Warn("LEMON_EMBED_BACKEND=onnx but model load failed; semantic recall disabled",
 				slog.String("path", path), slog.String("err", err.Error()))
@@ -188,6 +188,16 @@ func envOr(key, def string) string {
 func maxConnsOverride() int32 {
 	if v, err := strconv.Atoi(os.Getenv("LEMON_DB_MAX_CONNS")); err == nil && v > 0 {
 		return int32(v) //nolint:gosec // small positive pool size
+	}
+	return 0
+}
+
+// embedPoolSize reads LEMON_EMBED_POOL_SIZE (number of concurrent ONNX embed
+// pipelines); 0 (default) lets the adapter size it to GOMAXPROCS. Each pipeline
+// holds a model copy, so this trades RAM for embed parallelism — keep it ≈vCPUs.
+func embedPoolSize() int {
+	if v, err := strconv.Atoi(os.Getenv("LEMON_EMBED_POOL_SIZE")); err == nil && v > 0 {
+		return v
 	}
 	return 0
 }
