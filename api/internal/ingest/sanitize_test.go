@@ -209,3 +209,40 @@ func TestSanitizeRejectsBadRecord(t *testing.T) {
 		})
 	}
 }
+
+func TestNormalizePrice(t *testing.T) {
+	t.Parallel()
+	p := func(s string) *string { return &s }
+	cases := []struct {
+		in   *string
+		want *string
+	}{
+		{nil, nil},
+		{p(""), nil},
+		{p("  "), nil},
+		{p("affordable"), p("$")},
+		{p("Mid-Range"), p("$$")},
+		{p("premium"), p("$$$")},
+		{p("luxury"), p("$$$$")},
+		{p("$$"), p("$$")},
+		{p("unknown-tier"), nil},
+	}
+	for _, c := range cases {
+		got := normalizePrice(c.in)
+		switch {
+		case got == nil && c.want != nil:
+			t.Errorf("normalizePrice(%v) = nil, want %q", deref(c.in), *c.want)
+		case got != nil && c.want == nil:
+			t.Errorf("normalizePrice(%v) = %q, want nil", deref(c.in), *got)
+		case got != nil && c.want != nil && *got != *c.want:
+			t.Errorf("normalizePrice(%v) = %q, want %q", deref(c.in), *got, *c.want)
+		}
+	}
+}
+
+func deref(s *string) string {
+	if s == nil {
+		return "<nil>"
+	}
+	return *s
+}

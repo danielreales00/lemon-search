@@ -95,7 +95,7 @@ func Sanitize(raw json.RawMessage) (RawBusiness, error) {
 		LemonScore:        rec.LemonScore,
 		GoogleRating:      rec.GoogleRating,
 		GoogleReviewCount: rec.GoogleReviewCount,
-		PriceRange:        trimPtr(rec.PriceRange),
+		PriceRange:        normalizePrice(rec.PriceRange),
 		Hours:             nullableJSON(rec.Hours),
 		Photos:            dedupeNonEmpty(rec.Photos),
 		About:             joinAbout(rec.About),
@@ -117,6 +117,31 @@ func trimPtr(s *string) *string {
 	}
 	return &t
 }
+
+// normalizePrice maps the source's mixed price vocabulary onto the canonical
+// $-tier the schema documents (docs/data/schema.md). The data ships a mix of
+// "$$" and word tiers ("affordable"/"mid-range"/"premium"); the intent overlay's
+// price filter ("cheap"→$/$$, "fancy"→$$$/$$$$) only matches the $-tiers, so
+// without this any "cheap …" query returned zero rows. Unknown/blank → nil.
+func normalizePrice(s *string) *string {
+	if s == nil {
+		return nil
+	}
+	switch strings.ToLower(strings.TrimSpace(*s)) {
+	case "$", "affordable", "cheap", "budget":
+		return ptrTo("$")
+	case "$$", "mid-range", "midrange", "moderate":
+		return ptrTo("$$")
+	case "$$$", "premium", "upscale":
+		return ptrTo("$$$")
+	case "$$$$", "luxury", "expensive":
+		return ptrTo("$$$$")
+	default:
+		return nil
+	}
+}
+
+func ptrTo(s string) *string { return &s }
 
 // nullableJSON normalizes the hours passthrough: a JSON null literal (or an
 // absent field) becomes nil so the loader writes SQL NULL rather than the
