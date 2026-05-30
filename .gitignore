@@ -52,3 +52,6 @@ bench/results/
 
 # --- Local-only ---
 .claude/
+
+# ONNX embedding model (E6) — vendored at build/deploy, not in git (~86MB)
+api/models/

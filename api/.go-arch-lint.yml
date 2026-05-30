@@ -28,6 +28,8 @@ vendors:
     in: github.com/stretchr/testify/**
   net-http:
     in: net/http
+  hugot:
+    in: github.com/knights-analytics/hugot/**
 
 # ------- internal components -------
 components:
@@ -53,6 +55,8 @@ components:
     in: internal/retrieve/postgres/**
   embed-ollama:
     in: internal/retrieve/embed/ollama/**
+  embed-onnx:
+    in: internal/retrieve/embed/onnx/**
   cmd-api:
     in: cmd/api/**
   cmd-ingest:
@@ -122,6 +126,15 @@ deps:
     canUse: [net-http]
     anyVendorDeps: false
 
+  # embed-onnx: in-process embedding adapter (ADR-0006 E6 production runtime).
+  # Runs all-MiniLM via hugot's pure-Go GoMLX backend (CGO_ENABLED=0, no native
+  # libs); sees domain types only. embed-ollama is TEST-ONLY here — the parity
+  # test (embedder_integration_test.go) compares vectors against the Ollama
+  # adapter, and deepScan analyses *_test.go, so it must stay in the allowlist.
+  embed-onnx:
+    mayDependOn: [domain, embed-ollama]
+    canUse: [hugot]
+
   # api: thin HTTP transport. Production code imports only domain, search, and
   # rank (verify: grep the non-test files) — intent/config/DB now live behind the
   # search service. config + retrieve-postgres are TEST-ONLY here: the e2e/search
@@ -131,11 +144,12 @@ deps:
     mayDependOn: [domain, search, rank, observ, config, retrieve-postgres]
     canUse: [net-http]
 
-  # cmd-api: composition root for the server. Also constructs the Ollama query
-  # embedder (embed-ollama) for semantic recall when LEMON_FF_SEMANTIC is on
-  # (ADR-0006, E4) and injects it into the search service via the domain port.
+  # cmd-api: composition root for the server. Constructs the query embedder —
+  # Ollama (embed-ollama) or in-process ONNX (embed-onnx) per LEMON_EMBED_BACKEND
+  # — for semantic recall when LEMON_FF_SEMANTIC is on (ADR-0006, E4/E6) and
+  # injects it into the search service via the domain port.
   cmd-api:
-    mayDependOn: [domain, api, search, intent, rank, config, observ, flags, retrieve-postgres, embed-ollama]
+    mayDependOn: [domain, api, search, intent, rank, config, observ, flags, retrieve-postgres, embed-ollama, embed-onnx]
     canUse: [net-http, pgx, pgxpool, yaml]
 
   # cmd-ingest: ingestion CLI. Also the composition root for the embedding pass
@@ -150,5 +164,5 @@ deps:
   # to Meilisearch over its REST API (net/http) for the engine A/B, and builds the
   # Ollama embedder (embed-ollama) for the E5 semantic ON-vs-OFF go/no-go bench.
   cmd-bench-runner:
-    mayDependOn: [domain, config, rank, search, retrieve-postgres, embed-ollama]
+    mayDependOn: [domain, config, rank, search, retrieve-postgres, embed-ollama, embed-onnx]
     canUse: [pgx, pgxpool, net-http]

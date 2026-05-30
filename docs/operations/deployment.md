@@ -117,20 +117,56 @@ primary_region = "iad"
 
 ## Dockerfile (reference)
 
+The in-process ONNX embedder (ADR-0006 E6) uses hugot's **ORT backend** — native
+onnxruntime kernels (~2ms/embed). That makes the build CGo + glibc with two
+native libs, so the image is **debian-based, not alpine/static**:
+
+- build-time static link: **`libtokenizers.a`** (daulet/tokenizers, pinned to the
+  go.mod version) + `-tags ORT`, `CGO_ENABLED=1`.
+- runtime dlopen: **`libonnxruntime.so`** at `LEMON_ONNX_RUNTIME_DIR` (default
+  `/usr/lib`).
+- bundled model: `all-MiniLM-L6-v2` (`model.onnx` + `tokenizer.json`, ~86MB,
+  gitignored — fetched at build) at `LEMON_ONNX_MODEL_PATH`.
+
+> Owned + first-validated by the deploy chunk (#22). Verified locally on
+> darwin/arm64 (parity cosine 1.0, ON p95 ~17ms); the linux image below is the
+> target recipe, not yet CI-built.
+
 ```dockerfile
 # api/Dockerfile
-FROM golang:1.23-alpine AS build
+FROM golang:1.26-bookworm AS build
+ARG TOKENIZERS_VERSION=v1.27.0   # keep in sync with go.mod daulet/tokenizers
 WORKDIR /src
+# native build dep: prebuilt Rust tokenizer static lib
+ADD https://github.com/daulet/tokenizers/releases/download/${TOKENIZERS_VERSION}/libtokenizers.linux-amd64.tar.gz /tmp/
+RUN tar xzf /tmp/libtokenizers.linux-amd64.tar.gz -C /usr/lib
 COPY api/go.mod api/go.sum ./
 RUN go mod download
 COPY api/ ./
-RUN CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /out/api ./cmd/api
+RUN CGO_ENABLED=1 CGO_LDFLAGS="-L/usr/lib" \
+    go build -tags ORT -trimpath -ldflags='-s -w' -o /out/api ./cmd/api
 
-FROM alpine:3.20
-RUN apk add --no-cache ca-certificates tzdata
+FROM debian:bookworm-slim
+ARG ONNXRUNTIME_VERSION=1.22.0
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates tzdata curl \
+ && rm -rf /var/lib/apt/lists/*
+# runtime dep: onnxruntime shared lib (dlopen'd by the ORT backend)
+RUN curl -fsSL "https://github.com/microsoft/onnxruntime/releases/download/v${ONNXRUNTIME_VERSION}/onnxruntime-linux-x64-${ONNXRUNTIME_VERSION}.tgz" \
+    | tar xz -C /tmp \
+ && cp /tmp/onnxruntime-linux-x64-${ONNXRUNTIME_VERSION}/lib/libonnxruntime.so* /usr/lib/ \
+ && ln -sf /usr/lib/libonnxruntime.so.${ONNXRUNTIME_VERSION} /usr/lib/libonnxruntime.so
+# embedding model (fetched at build; gitignored, ~86MB)
+RUN mkdir -p /app/models/all-MiniLM-L6-v2 \
+ && for f in model.onnx tokenizer.json config.json tokenizer_config.json vocab.txt special_tokens_map.json; do \
+      curl -fsSL -o /app/models/all-MiniLM-L6-v2/$f \
+        https://huggingface.co/KnightsAnalytics/all-MiniLM-L6-v2/resolve/main/$f; \
+    done
 COPY --from=build /out/api /app/api
 COPY config/ /app/config/
-USER nobody
+ENV LEMON_FF_SEMANTIC=true \
+    LEMON_EMBED_BACKEND=onnx \
+    LEMON_ONNX_MODEL_PATH=/app/models/all-MiniLM-L6-v2 \
+    LEMON_ONNX_RUNTIME_DIR=/usr/lib
 EXPOSE 8080
 ENTRYPOINT ["/app/api"]
 ```
