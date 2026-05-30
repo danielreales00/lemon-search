@@ -1,7 +1,8 @@
 'use client';
 
-import { useCallback, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 
+import { CategoryChips } from '@/components/CategoryChips';
 import { ResultsList } from '@/components/ResultsList';
 import { SearchBar } from '@/components/SearchBar';
 import { SearchError, searchBusinesses } from '@/lib/api';
@@ -14,62 +15,58 @@ type SearchState =
   | { status: 'error'; message: string }
   | { status: 'ok'; results: Business[]; query: string; totalMs: number };
 
+const DEBOUNCE_MS = 50;
+
 export function SearchPage(): React.JSX.Element {
+  const [query, setQuery] = useState('');
   const [state, setState] = useState<SearchState>({ status: 'idle' });
-  const abortRef = useRef<AbortController | undefined>(undefined);
 
-  const handleSearch = useCallback((query: string): void => {
-    if (abortRef.current !== undefined) {
-      abortRef.current.abort();
-    }
-
-    if (query.trim() === '') {
+  // One effect owns the search lifecycle: it debounces keystrokes, aborts the
+  // in-flight request on the next change (cleanup), and shows loading eagerly so
+  // the UI feels instant. Category cards just call setQuery — same path.
+  useEffect(() => {
+    const q = query.trim();
+    if (q === '') {
       setState({ status: 'idle' });
       return;
     }
 
     const controller = new AbortController();
-    abortRef.current = controller;
     setState({ status: 'loading' });
+    const timer = setTimeout(() => {
+      void searchBusinesses({ q }, controller.signal).then(
+        (data) => {
+          setState({
+            status: 'ok',
+            results: data.results,
+            query: data.query,
+            totalMs: data.timings.total_ms,
+          });
+        },
+        (err: unknown) => {
+          if (err instanceof Error && err.name === 'AbortError') {
+            return;
+          }
+          const message =
+            err instanceof SearchError
+              ? `Search failed (${err.status.toString()})`
+              : 'Something went wrong. Please try again.';
+          setState({ status: 'error', message });
+        },
+      );
+    }, DEBOUNCE_MS);
 
-    void searchBusinesses({ q: query }, controller.signal).then(
-      (data) => {
-        setState({
-          status: 'ok',
-          results: data.results,
-          query: data.query,
-          totalMs: data.timings.total_ms,
-        });
-      },
-      (err: unknown) => {
-        if (err instanceof Error && err.name === 'AbortError') {
-          return;
-        }
-        const message =
-          err instanceof SearchError
-            ? `Search failed (${err.status.toString()})`
-            : 'Something went wrong. Please try again.';
-        setState({ status: 'error', message });
-      },
-    );
-  }, []);
-
-  const handleQueryChange = useCallback((query: string): void => {
-    if (query.trim() === '') {
-      if (abortRef.current !== undefined) {
-        abortRef.current.abort();
-      }
-      setState({ status: 'idle' });
-    }
-  }, []);
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [query]);
 
   return (
     <>
-      <SearchBar onResults={handleSearch} onQueryChange={handleQueryChange} />
+      <SearchBar value={query} onChange={setQuery} />
       <div className="search-results" role="region" aria-label="Search results">
-        {state.status === 'idle' && (
-          <p className="search-prompt">Search Miami businesses, services, and more.</p>
-        )}
+        {state.status === 'idle' && <CategoryChips onPick={setQuery} />}
         {state.status === 'loading' && (
           <p className="search-loading" aria-live="polite">
             Searching…
@@ -88,8 +85,10 @@ export function SearchPage(): React.JSX.Element {
         {state.status === 'ok' && state.results.length > 0 && (
           <>
             <p className="search-timing" aria-live="polite">
-              {state.results.length} result{state.results.length !== 1 ? 's' : ''} in{' '}
-              {state.totalMs}ms
+              <span className="result-count">
+                {state.results.length} result{state.results.length !== 1 ? 's' : ''}
+              </span>
+              <span className="timing-pill">{state.totalMs}ms</span>
             </p>
             <ResultsList results={state.results} />
           </>

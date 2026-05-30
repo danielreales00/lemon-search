@@ -1,50 +1,37 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
-
 interface SearchBarProps {
-  onResults: (query: string) => void;
-  onQueryChange: (query: string) => void;
+  value: string;
+  onChange: (query: string) => void;
 }
 
-const DEBOUNCE_MS = 50;
-
-export function SearchBar({ onResults, onQueryChange }: SearchBarProps): React.JSX.Element {
-  const [value, setValue] = useState('');
-  const timerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-
-  useEffect(() => {
-    return () => {
-      if (timerRef.current !== undefined) {
-        clearTimeout(timerRef.current);
-      }
-    };
-  }, []);
-
-  function handleChange(e: React.ChangeEvent<HTMLInputElement>): void {
-    const q = e.target.value;
-    setValue(q);
-    onQueryChange(q);
-
-    if (timerRef.current !== undefined) {
-      clearTimeout(timerRef.current);
-    }
-
-    timerRef.current = setTimeout(() => {
-      onResults(q);
-    }, DEBOUNCE_MS);
-  }
-
+export function SearchBar({ value, onChange }: SearchBarProps): React.JSX.Element {
   return (
     <div className="search-bar">
+      <svg
+        className="search-icon"
+        viewBox="0 0 24 24"
+        width="20"
+        height="20"
+        aria-hidden="true"
+        focusable="false"
+      >
+        <path
+          d="M11 4a7 7 0 1 0 4.2 12.6l4.1 4.1 1.4-1.4-4.1-4.1A7 7 0 0 0 11 4Zm0 2a5 5 0 1 1 0 10 5 5 0 0 1 0-10Z"
+          fill="currentColor"
+        />
+      </svg>
       <input
         type="search"
         aria-label="Search Miami businesses"
-        placeholder="Search for a business, service, or category…"
+        placeholder="Try “chill place to work” or “tacos near me”"
         value={value}
-        onChange={handleChange}
+        onChange={(e) => {
+          onChange(e.target.value);
+        }}
         autoComplete="off"
         spellCheck={false}
+        autoFocus
         className="search-input"
       />
     </div>
