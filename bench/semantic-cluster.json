@@ -1,0 +1,31 @@
+{
+  "$note": "E5 (ADR-0006) hand-labeled NL/vibe query set for the semantic go/no-go bench. Ground truth is category/subcategory level (NOT exact names): a vibe query should surface the right TYPE of business. `expect` is a list of lowercase substring tokens matched against `category + ' ' + subcategory` of each top-3 result; a query passes if ANY top-3 result matches ANY token. Tokens are grounded against the real DB taxonomy (subcategory values are messy, so substrings absorb the variants). These are paraphrase/intent queries with little or no keyword overlap — exactly where lexical recall is expected to fall through and the embedding channel should earn its place.",
+  "user_location": { "lat": 25.7741728, "lng": -80.1937, "label": "Downtown Miami" },
+  "now_override": "2026-05-27T13:00:00-04:00",
+  "tests": [
+    { "q": "chill place to work on my laptop", "expect": ["coworking", "caf"], "note": "vibe: coworking / laptop-friendly cafe" },
+    { "q": "somewhere to get pampered", "expect": ["spa", "massage", "salon"], "note": "vibe: spa / beauty" },
+    { "q": "i need to relax and unwind", "expect": ["spa", "massage", "yoga", "recovery"], "note": "vibe: wellness" },
+    { "q": "where to watch the game with friends", "expect": ["bar", "brewery", "pub"], "note": "vibe: sports bar" },
+    { "q": "romantic spot for an anniversary dinner", "expect": ["restaurant", "steakhouse", "italian", "seafood", "japanese", "cuban"], "note": "vibe: upscale dining" },
+    { "q": "fun activity for the kids this weekend", "expect": ["kids", "arcade", "bowling", "trampoline", "gymnastics", "water"], "note": "vibe: family activity" },
+    { "q": "place to celebrate a birthday party", "expect": ["venue", "event", "arcade", "bowling", "restaurant", "lounge"], "note": "vibe: party venue" },
+    { "q": "grab a quick bite before work", "expect": ["caf", "bakery", "food truck", "pizz"], "note": "intent: fast casual" },
+    { "q": "i'm hungry", "expect": ["restaurant", "caf", "pizz", "bakery", "mexican", "cuban"], "note": "spec example: surface food" },
+    { "q": "morning coffee and a pastry", "expect": ["caf", "bakery"], "note": "vibe: coffee shop" },
+    { "q": "something healthy for lunch", "expect": ["vegan", "juice", "smoothie", "bowl", "salad"], "note": "vibe: healthy food" },
+    { "q": "rooftop cocktails with a view", "expect": ["bar", "lounge", "rooftop"], "note": "vibe: rooftop bar" },
+    { "q": "i want to get in shape", "expect": ["gym", "studio", "pilates", "yoga", "boxing", "crossfit", "hiit"], "note": "vibe: fitness" },
+    { "q": "pamper my nails", "expect": ["nail"], "note": "lexical-adjacent control: should pass both arms" },
+    { "q": "freshen up my haircut", "expect": ["barber", "hair"], "note": "vibe: barber / hair" },
+    { "q": "treat myself to a relaxing massage", "expect": ["massage", "spa"], "note": "vibe: massage" },
+    { "q": "get my car fixed", "expect": ["repair", "auto", "detailing"], "note": "vibe: auto repair" },
+    { "q": "photographer for my wedding", "expect": ["photograph"], "note": "vibe: wedding photography" },
+    { "q": "fresh flowers for a date", "expect": ["florist"], "note": "vibe: florist" },
+    { "q": "my dog needs a bath and trim", "expect": ["grooming", "pet"], "note": "vibe: pet grooming" },
+    { "q": "thinking about getting some ink", "expect": ["tattoo"], "note": "vibe: tattoo (no keyword overlap)" },
+    { "q": "spend the day out on the water", "expect": ["water", "boat"], "note": "vibe: water sports / boat" },
+    { "q": "i feel like sushi tonight", "expect": ["japanese", "sushi"], "note": "lexical-adjacent control" },
+    { "q": "cheap eats near me", "expect": ["caf", "food truck", "pizz", "bakery", "mexican", "restaurant"], "note": "spec example: affordable food" }
+  ]
+}
