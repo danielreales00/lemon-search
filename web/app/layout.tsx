@@ -4,9 +4,9 @@ import type { ReactNode } from 'react';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'Lemon Search',
+  title: 'Lemon — Search Miami',
   description:
-    'Discover, compare, and book any service in your city — typo-tolerant, ranked search over local businesses.',
+    'From dinner to dentist. Discover any business in Miami — typo-tolerant, ranked, sub-100ms search over ~23k local businesses.',
 };
 
 export default function RootLayout({ children }: { children: ReactNode }): React.JSX.Element {

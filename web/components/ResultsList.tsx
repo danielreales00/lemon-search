@@ -29,9 +29,10 @@ function formatDistance(km: number): string {
 
 interface BusinessRowProps {
   business: Business;
+  rank: number;
 }
 
-function BusinessRow({ business }: BusinessRowProps): React.JSX.Element {
+function BusinessRow({ business, rank }: BusinessRowProps): React.JSX.Element {
   const categoryLabel =
     business.subcategory !== null
       ? `${business.category} · ${business.subcategory}`
@@ -39,25 +40,29 @@ function BusinessRow({ business }: BusinessRowProps): React.JSX.Element {
 
   return (
     <li className="result-item">
-      {business.photo_url !== null && (
-        // The spec requires a plain lazy <img> thumbnail; Next.js image optimisation
-        // is intentionally skipped here per the contract requirements. Many source
-        // photo URLs are dead (Google-hosted 404 / ORB-blocked), so hide a failed
-        // image rather than show a broken-icon (no broken states, fewer console
-        // 404s a user would notice). The dead-URL data issue is flagged in the writeup.
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
-          src={business.photo_url}
-          alt=""
-          loading="lazy"
-          className="result-photo"
-          width={64}
-          height={64}
-          onError={(e) => {
-            e.currentTarget.style.display = 'none';
-          }}
-        />
-      )}
+      <span className="result-rank" aria-hidden="true">
+        {rank}
+      </span>
+      <div className="result-photo">
+        {business.photo_url !== null && (
+          // The spec requires a plain lazy <img> thumbnail; Next.js image optimisation
+          // is intentionally skipped here per the contract requirements. Many source
+          // photo URLs are dead (Google-hosted 404 / ORB-blocked), so hide a failed
+          // image — the tile's branded 🍋 placeholder shows through, keeping every
+          // card aligned with no broken-icon. The dead-URL data issue is in the writeup.
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={business.photo_url}
+            alt=""
+            loading="lazy"
+            width={64}
+            height={64}
+            onError={(e) => {
+              e.currentTarget.style.display = 'none';
+            }}
+          />
+        )}
+      </div>
       <div className="result-body">
         <div className="result-header">
           <span className="result-name">{business.name}</span>
@@ -97,8 +102,8 @@ function BusinessRow({ business }: BusinessRowProps): React.JSX.Element {
 export function ResultsList({ results }: ResultsListProps): React.JSX.Element {
   return (
     <ul className="results-list" aria-label="Search results">
-      {results.map((business) => (
-        <BusinessRow key={business.id} business={business} />
+      {results.map((business, i) => (
+        <BusinessRow key={business.id} business={business} rank={i + 1} />
       ))}
     </ul>
   );
