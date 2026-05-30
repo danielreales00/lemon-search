@@ -1,3 +1,5 @@
+'use client';
+
 import type { Business } from '@/lib/api';
 
 interface ResultsListProps {
@@ -39,7 +41,10 @@ function BusinessRow({ business }: BusinessRowProps): React.JSX.Element {
     <li className="result-item">
       {business.photo_url !== null && (
         // The spec requires a plain lazy <img> thumbnail; Next.js image optimisation
-        // is intentionally skipped here per the contract requirements.
+        // is intentionally skipped here per the contract requirements. Many source
+        // photo URLs are dead (Google-hosted 404 / ORB-blocked), so hide a failed
+        // image rather than show a broken-icon (no broken states, fewer console
+        // 404s a user would notice). The dead-URL data issue is flagged in the writeup.
         // eslint-disable-next-line @next/next/no-img-element
         <img
           src={business.photo_url}
@@ -48,6 +53,9 @@ function BusinessRow({ business }: BusinessRowProps): React.JSX.Element {
           className="result-photo"
           width={64}
           height={64}
+          onError={(e) => {
+            e.currentTarget.style.display = 'none';
+          }}
         />
       )}
       <div className="result-body">
@@ -69,8 +77,14 @@ function BusinessRow({ business }: BusinessRowProps): React.JSX.Element {
           <span className="chip chip--distance">{formatDistance(business.distance_km)}</span>
         </div>
         <div className="result-stats">
-          <span className="result-rating">★ {business.rating.toFixed(1)}</span>
-          <span className="result-reviews">({business.review_count.toLocaleString()})</span>
+          {business.rating !== null ? (
+            <>
+              <span className="result-rating">★ {business.rating.toFixed(1)}</span>
+              <span className="result-reviews">({business.review_count.toLocaleString()})</span>
+            </>
+          ) : (
+            <span className="result-rating result-rating--none">no rating yet</span>
+          )}
           {business.price_range !== null && (
             <span className="result-price">{business.price_range}</span>
           )}

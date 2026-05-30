@@ -94,17 +94,42 @@ func (s *Service) Search(ctx context.Context, q string, opts domain.SearchOpts) 
 		pinPtr = &pin
 	}
 
+	// Rank the full pool, then dedupe by name and take the top resultLimit, so a
+	// chain's repeated locations (e.g. several "Häagen-Dazs") don't crowd out
+	// distinct businesses — the freed slots backfill from the ranked remainder.
 	rankOpts := opts
-	rankOpts.Limit = resultLimit
+	rankOpts.Limit = candidateLimit
 
 	rerankStart := time.Now()
 	ranked, err := rank.Run(ctx, candidates, pinPtr, s.cfg, rankOpts)
 	if err != nil {
 		return nil, Timings{}, fmt.Errorf("ranking: %w", err)
 	}
+	ranked = dedupeByName(ranked, resultLimit)
 	rerankMS := sinceMS(rerankStart)
 
 	return ranked, Timings{IntentMS: intentMS, EmbedMS: embedMS, SQLMS: sqlMS, RerankMS: rerankMS}, nil
+}
+
+// dedupeByName keeps the first (highest-ranked) result per normalized name and
+// returns at most limit of them, so the top-N is N distinct businesses rather
+// than several locations of one chain. Locations carrying distinct names
+// ("Panther Coffee" vs "Panther Coffee - Wynwood") are kept.
+func dedupeByName(ranked []rank.Result, limit int) []rank.Result {
+	seen := make(map[string]struct{}, len(ranked))
+	out := make([]rank.Result, 0, limit)
+	for i := range ranked {
+		key := strings.ToLower(strings.TrimSpace(ranked[i].Candidate.Name))
+		if _, dup := seen[key]; dup {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, ranked[i])
+		if len(out) == limit {
+			break
+		}
+	}
+	return out
 }
 
 // embedQuery embeds q for semantic recall when an embedder is wired (the

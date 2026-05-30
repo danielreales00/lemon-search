@@ -9,7 +9,7 @@ export interface Business {
   archetype: string;
   neighborhood: string | null;
   distance_km: number;
-  rating: number;
+  rating: number | null; // API maps it from nullable google_rating
   review_count: number;
   price_range: string | null;
   photo_url: string | null;
