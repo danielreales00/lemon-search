@@ -267,3 +267,28 @@ func TestServiceExactNameErrorIsWrapped(t *testing.T) {
 		t.Fatal("want error when exact-name lookup fails")
 	}
 }
+
+func TestDedupeByName(t *testing.T) {
+	t.Parallel()
+	r := func(name string) rank.Result { return rank.Result{Candidate: domain.Candidate{Name: name}} }
+	in := []rank.Result{
+		r("Häagen-Dazs"), r("Häagen-Dazs"), r("Panther Coffee"),
+		r("häagen-dazs"), r(" Joe's "), r("Cafe X"),
+	}
+
+	got := dedupeByName(in, 3)
+	want := []string{"Häagen-Dazs", "Panther Coffee", " Joe's "} // dups (incl. case) collapsed, backfilled, capped at 3
+	if len(got) != 3 {
+		t.Fatalf("len = %d, want 3", len(got))
+	}
+	for i, w := range want {
+		if got[i].Candidate.Name != w {
+			t.Errorf("got[%d] = %q, want %q", i, got[i].Candidate.Name, w)
+		}
+	}
+
+	// limit beyond distinct count returns all distinct (4 here)
+	if all := dedupeByName(in, 10); len(all) != 4 {
+		t.Errorf("distinct count = %d, want 4", len(all))
+	}
+}
