@@ -20,11 +20,13 @@ thin — the engine is the point.
 | Layer | Choice | Region |
 |---|---|---|
 | Frontend | Next.js 15 (App Router, React 19) on Vercel | edge |
-| API | Go 1.23, `pgx/v5`, `slog`, on Fly.io | `iad` |
+| API | Go 1.23, `pgx/v5`, `slog`, on AWS EC2 (`c7i.xlarge`, ADR-0007) | `us-east-1` |
 | Database | Supabase Postgres 15 (`pg_trgm`, `cube`, `earthdistance`) | `us-east-1` |
 | Ranking config | YAML (`config/ranking.yaml`) | — |
 
-Fly `iad` + Supabase `us-east-1` are paired on purpose (API↔DB hop ≤ 10ms).
+EC2 + Supabase both in `us-east-1` are paired on purpose (API↔DB hop ≤ 10ms).
+The API host moved Fly→EC2 for SSH/profiling of the CGo embedder (ADR-0007);
+ADR-0001 still governs the rest of the stack.
 
 ## Architecture — boundaries you MUST NOT violate
 
