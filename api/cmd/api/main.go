@@ -28,6 +28,7 @@ import (
 	"github.com/danielreales00/lemon-search/api/internal/flags"
 	"github.com/danielreales00/lemon-search/api/internal/observ"
 	ollama "github.com/danielreales00/lemon-search/api/internal/retrieve/embed/ollama"
+	onnx "github.com/danielreales00/lemon-search/api/internal/retrieve/embed/onnx"
 	pgrepo "github.com/danielreales00/lemon-search/api/internal/retrieve/postgres"
 	"github.com/danielreales00/lemon-search/api/internal/search"
 )
@@ -40,13 +41,15 @@ var (
 )
 
 const (
-	defaultPort        = "8080"
-	defaultRankingPath = "config/ranking.yaml"
-	shutdownTimeout    = 10 * time.Second
-	readHeaderTO       = 5 * time.Second
-	statementTO        = "1000" // ms; per-query Postgres statement_timeout (docs/api.md)
-	defaultOllamaURL   = "http://localhost:11434"
-	defaultOllamaModel = "all-minilm"
+	defaultPort         = "8080"
+	defaultRankingPath  = "config/ranking.yaml"
+	shutdownTimeout     = 10 * time.Second
+	readHeaderTO        = 5 * time.Second
+	statementTO         = "1000" // ms; per-query Postgres statement_timeout (docs/api.md)
+	defaultOllamaURL    = "http://localhost:11434"
+	defaultOllamaModel  = "all-minilm"
+	defaultEmbedBackend = "ollama" // LEMON_EMBED_BACKEND: ollama (measure) | onnx (prod)
+	defaultONNXModel    = "models/all-MiniLM-L6-v2"
 )
 
 func main() {
@@ -84,7 +87,9 @@ func run(ctx context.Context, logger *slog.Logger) error {
 	// svc nil so /search reports 503 while the health endpoints keep working.
 	var svc *search.Service
 	if repo != nil && cfg != nil {
-		svc = search.New(logger, repo, cfg, ff.Intent, semanticEmbedder(logger, ff.Semantic))
+		emb, closeEmb := buildEmbedder(ctx, logger, ff.Semantic)
+		defer closeEmb()
+		svc = search.New(logger, repo, cfg, ff.Intent, emb)
 	}
 
 	build := api.BuildInfo{Version: version, Commit: commit, Date: date}
@@ -122,25 +127,46 @@ func openPool(ctx context.Context, logger *slog.Logger, url string) (*pgxpool.Po
 	return pool, pool.Close
 }
 
-// semanticEmbedder builds the query embedder for the semantic recall channel
-// when LEMON_FF_SEMANTIC is on (ADR-0006, E4). This is the only place the Ollama
-// adapter is constructed in the server. Off → nil (no embedder dependency, no
-// query embedding). A construction failure logs and returns nil so the server
-// still boots and search degrades to lexical-only rather than crashing.
-func semanticEmbedder(logger *slog.Logger, enabled bool) domain.Embedder {
+// buildEmbedder constructs the query embedder for semantic recall when
+// LEMON_FF_SEMANTIC is on (ADR-0006). LEMON_EMBED_BACKEND selects the runtime:
+//   - "onnx"   → in-process pure-Go model, no sidecar (E6 production target)
+//   - "ollama" → localhost Ollama sidecar (default; the measurement runtime, E2)
+//
+// This is the only place the embedder adapters are constructed in the server.
+// Off — or on a construction failure — returns a nil embedder so the server
+// still boots and search degrades to lexical-only rather than crashing. The
+// returned func releases adapter resources (the ONNX session) on shutdown.
+func buildEmbedder(ctx context.Context, logger *slog.Logger, enabled bool) (domain.Embedder, func()) {
+	noop := func() {}
 	if !enabled {
-		return nil
+		return nil, noop
+	}
+	backend := envOr("LEMON_EMBED_BACKEND", defaultEmbedBackend)
+	if backend == "onnx" {
+		path := envOr("LEMON_ONNX_MODEL_PATH", defaultONNXModel)
+		emb, err := onnx.New(ctx, path, os.Getenv("LEMON_ONNX_RUNTIME_DIR"))
+		if err != nil {
+			logger.Warn("LEMON_EMBED_BACKEND=onnx but model load failed; semantic recall disabled",
+				slog.String("path", path), slog.String("err", err.Error()))
+			return nil, noop
+		}
+		logger.Info("semantic recall enabled (in-process onnx)", slog.String("model", path))
+		return emb, func() {
+			if err := emb.Close(); err != nil {
+				logger.Warn("closing onnx embedder", slog.String("err", err.Error()))
+			}
+		}
 	}
 	url := envOr("LEMON_OLLAMA_URL", defaultOllamaURL)
 	model := envOr("LEMON_OLLAMA_MODEL", defaultOllamaModel)
 	emb, err := ollama.New(url, nil, model)
 	if err != nil {
-		logger.Warn("LEMON_FF_SEMANTIC on but embedder build failed; semantic recall disabled",
+		logger.Warn("LEMON_FF_SEMANTIC on but Ollama embedder build failed; semantic recall disabled",
 			slog.String("err", err.Error()))
-		return nil
+		return nil, noop
 	}
-	logger.Info("semantic recall enabled", slog.String("ollama", url), slog.String("model", model))
-	return emb
+	logger.Info("semantic recall enabled (ollama)", slog.String("ollama", url), slog.String("model", model))
+	return emb, noop
 }
 
 func envOr(key, def string) string {

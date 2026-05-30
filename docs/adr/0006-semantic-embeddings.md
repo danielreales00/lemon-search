@@ -115,6 +115,32 @@ every keystroke; the query-embed fires on the settled / multi-word query (an
 optimization under MiniLM, not a correctness requirement — each request still
 clears the gate either way).
 
+### E6 runtime resolution (2026-05-29) — measured three runtimes; chose in-process ORT
+
+E5 cleared the gate (pass@3 50→88%, +38pp), so E6 productionized the runtime.
+We measured all three in-process/sidecar options on the same model + harness
+(per-query embed, local):
+
+| runtime | embed p50 | ON-pipeline p95 | native deps | verdict |
+|---|---|---|---|---|
+| pure-Go GoMLX (hugot `GO`) | ~67ms | ~95-103ms | none (`CGO_ENABLED=0`) | **fails the 100ms gate** — GoMLX is an interpreter (no SIMD) |
+| Ollama sidecar (E2) | ~15ms | ~30-40ms | sidecar process | clears, but a sidecar |
+| **in-process ORT (hugot `ORT`)** | **~1-2ms** | **~17ms** | libonnxruntime + libtokenizers (CGo) | **chosen** — fastest, no sidecar |
+
+The hop is ~1-2ms; **compute dominates**, so the only fast path is native
+onnxruntime kernels — which means CGo + two native libs (`libonnxruntime`
+runtime-dlopen, `libtokenizers.a` build-time static). We took that build cost for
+the ~9× speedup over Ollama and the no-sidecar single-binary coherence. The
+GoMLX pure-Go path was attractive (`CGO_ENABLED=0`, zero libs) but is ~40× slower
+and fails the gate, so it was rejected as the runtime.
+
+Behind the `domain.Embedder` port, so it is a drop-in swap: `LEMON_EMBED_BACKEND`
+selects `ollama` (default; no native deps) or `onnx` (ORT). The ORT path is
+tag-gated (`-tags ORT`) and CGo, so default/CI builds compile via hugot's stub
+(no libs needed) and only the deploy image bundles the libs + model (#22; recipe
+in `docs/operations/deployment.md`). Toolchain bumped Go 1.23 → 1.26 (hugot
+v0.7.4 floor).
+
 ## Consequences
 
 **Good**
@@ -157,7 +183,7 @@ clears the gate either way).
   dropped.
 - **E4** (#92) query-embed in `search.Service` + vector recall blend in `search_candidates`, behind `LEMON_FF_SEMANTIC`.
 - **E5** (#93) semantic bench (NL query set → expected businesses) + **latency measurement** (p50/p95 with vs without) — the go/no-go gate.
-- **E6** (#95) in-process ONNX adapter for production, behind the same port — pursue only if E5 clears the gate.
+- **E6** (#95) in-process ONNX adapter for production, behind the same port — **done**: measured 3 runtimes (see "E6 runtime resolution") and shipped the **ORT (CGo) backend** at ~2ms/embed, `LEMON_EMBED_BACKEND=onnx`. Default/CI builds compile via the stub (no native libs); the deploy image (#22) bundles libonnxruntime + libtokenizers + model.
 - ~~**E7** `semantic_relevance` ranking signal~~ — **rejected as counter-spec** (Decision §4): it would add an 8th ranking signal. Relevance stays in retrieval.
 
 ## Cross-references

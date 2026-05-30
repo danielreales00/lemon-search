@@ -12,12 +12,14 @@ import (
 	"github.com/danielreales00/lemon-search/api/internal/domain"
 	"github.com/danielreales00/lemon-search/api/internal/rank"
 	ollama "github.com/danielreales00/lemon-search/api/internal/retrieve/embed/ollama"
+	onnx "github.com/danielreales00/lemon-search/api/internal/retrieve/embed/onnx"
 	"github.com/danielreales00/lemon-search/api/internal/search"
 )
 
 const (
 	defaultOllamaURL   = "http://localhost:11434"
 	defaultOllamaModel = "all-minilm"
+	defaultONNXModel   = "models/all-MiniLM-L6-v2"
 	// materialLiftPP is the pass@3 gain (percentage points) below which the
 	// semantic channel does not justify its latency/ops cost (E5 gate).
 	materialLiftPP = 10.0
@@ -71,14 +73,13 @@ func runSemantic(ctx context.Context, cfg *config.Ranking, repo domain.BusinessR
 	if err != nil {
 		return fmt.Errorf("parsing now_override %q: %w", sf.NowOverride, err)
 	}
-	// Typed as the domain port (not the concrete adapter) so the search service
-	// depends on the interface — the same composition-root pattern as cmd/ingest.
-	var emb domain.Embedder
-	oll, err := ollama.New(defaultOllamaURL, nil, defaultOllamaModel)
+	// LEMON_EMBED_BACKEND selects the runtime under test (ollama | onnx), so the
+	// same harness re-measures the in-process ONNX path vs the Ollama hop.
+	emb, closeEmb, err := benchEmbedder(ctx)
 	if err != nil {
-		return fmt.Errorf("building embedder (is `ollama serve` running with %s?): %w", defaultOllamaModel, err)
+		return err
 	}
-	emb = oll
+	defer closeEmb()
 
 	svcOff := search.New(benchLogger(), repo, cfg, true, nil)
 	svcOn := search.New(benchLogger(), repo, cfg, true, emb)
@@ -93,6 +94,36 @@ func runSemantic(ctx context.Context, cfg *config.Ranking, repo domain.BusinessR
 	}
 	printSemanticSummary(o.semanticOut, results)
 	return nil
+}
+
+// benchEmbedder builds the embedder under test, selected by LEMON_EMBED_BACKEND
+// (ollama | onnx; default ollama) — so the same harness re-measures the
+// in-process ONNX path's latency against the Ollama hop. Typed as the domain
+// port; the returned func releases ONNX session resources.
+func benchEmbedder(ctx context.Context) (domain.Embedder, func(), error) {
+	noop := func() {}
+	if envDefault("LEMON_EMBED_BACKEND", "ollama") == "onnx" {
+		path := envDefault("LEMON_ONNX_MODEL_PATH", defaultONNXModel)
+		o, err := onnx.New(ctx, path, os.Getenv("LEMON_ONNX_RUNTIME_DIR"))
+		if err != nil {
+			return nil, noop, fmt.Errorf("building onnx embedder (model at %s): %w", path, err)
+		}
+		var emb domain.Embedder = o
+		return emb, func() { _ = o.Close() }, nil
+	}
+	o, err := ollama.New(defaultOllamaURL, nil, defaultOllamaModel)
+	if err != nil {
+		return nil, noop, fmt.Errorf("building ollama embedder (is `ollama serve` running with %s?): %w", defaultOllamaModel, err)
+	}
+	var emb domain.Embedder = o
+	return emb, noop, nil
+}
+
+func envDefault(key, def string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return def
 }
 
 // runSemanticOne runs a single query through both arms and times each. The OFF

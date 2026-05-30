@@ -15,7 +15,7 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
-  GO_VERSION: "1.23"
+  GO_VERSION: "1.26"
   NODE_VERSION: "20"
 
 jobs:
@@ -43,7 +43,13 @@ jobs:
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v6
         with:
-          version: latest
+          version: v1.64.8
+          # goinstall builds golangci-lint from source with THIS job's Go
+          # toolchain (1.26). The prebuilt binary is compiled with an older Go and
+          # cannot typecheck our Go 1.26 deps (hugot/gomlx) — it errors "package
+          # requires newer Go version". Compiling it here keeps the typechecker in
+          # sync with the module's Go version.
+          install-mode: goinstall
           working-directory: api
           # Build tags so the integration- and e2e-tagged test files are linted
           # too (they are excluded from the default, untagged build).

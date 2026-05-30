@@ -104,9 +104,20 @@ _One paragraph: what shipped, p95 latency, bench pass rate, biggest call._
   pampered", "thinking about getting some ink" — flip from miss to hit; lexical
   controls don't regress. Full table: `bench/semantic-results-2026-05-29.md`. The
   three residual misses are ground-truth labeling edges (e.g. "Naked Farmer"
-  categorized generically), not recall failures. Recommendation: graduate toward
-  default-on + the in-process ONNX runtime (E6) so it ships without the Ollama
-  sidecar.
+  categorized generically), not recall failures.
+- **Production runtime — measured three, chose in-process ORT (E6).** Behind the
+  `Embedder` port, `LEMON_EMBED_BACKEND` selects the runtime; we benchmarked all
+  three on the same model/harness: **pure-Go GoMLX ~67ms/embed (fails the 100ms
+  gate — it's an interpreter), Ollama sidecar ~15ms, in-process ONNX-Runtime
+  ~1-2ms** (ON-pipeline p95 **~17ms**), all at cosine-1.0 parity. The hop is
+  ~1-2ms, so compute dominates and only native onnxruntime kernels are fast
+  enough — at the cost of CGo + two native libs (libonnxruntime + libtokenizers).
+  We took that build cost for the ~9× speedup + no sidecar. The pure-Go path was
+  tempting (zero deps, static binary) but ~40× slower, so it's rejected as the
+  runtime. The ORT build is tag-gated (`-tags ORT`), so default/CI builds compile
+  via a stub with no native libs; only the deploy image bundles them
+  (`docs/operations/deployment.md`). Required the Go 1.23 → 1.26 toolchain bump
+  (hugot floor). Verdict: ships default-on via ORT.
 
 ## Bench results
 
