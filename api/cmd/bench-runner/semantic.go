@@ -104,7 +104,7 @@ func benchEmbedder(ctx context.Context) (domain.Embedder, func(), error) {
 	noop := func() {}
 	if envDefault("LEMON_EMBED_BACKEND", "ollama") == "onnx" {
 		path := envDefault("LEMON_ONNX_MODEL_PATH", defaultONNXModel)
-		o, err := onnx.New(ctx, path, os.Getenv("LEMON_ONNX_RUNTIME_DIR"))
+		o, err := onnx.New(ctx, path, os.Getenv("LEMON_ONNX_RUNTIME_DIR"), 0)
 		if err != nil {
 			return nil, noop, fmt.Errorf("building onnx embedder (model at %s): %w", path, err)
 		}

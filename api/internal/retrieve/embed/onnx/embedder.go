@@ -21,7 +21,7 @@ package onnx
 import (
 	"context"
 	"fmt"
-	"sync"
+	"runtime"
 
 	"github.com/knights-analytics/hugot"
 	"github.com/knights-analytics/hugot/options"
@@ -34,27 +34,44 @@ import (
 // also holds tokenizer.json + the BERT config the tokenizer reads).
 const onnxFilename = "model.onnx"
 
-// Embedder is the in-process domain.Embedder. onnxruntime's Run is thread-safe,
-// but the hugot pipeline + tokenizer wrapping is not documented as such, so
-// RunPipeline is serialized by mu; query embeds are ~2ms, so a single shared
-// pipeline is ample for V1. A pipeline pool is the lever if embed throughput
-// ever bounds the hot path.
+// Embedder is the in-process domain.Embedder. A single RunPipeline is not
+// concurrency-safe (the Rust tokenizer wrapping isn't documented as such), so
+// instead of serializing every embed behind one shared pipeline, we hold a pool
+// of independent pipelines and check one out per call. The pool channel doubles
+// as the semaphore: at most len(pool) embeds run at once, each on its own ORT
+// inference session, so concurrent queries scale across cores instead of
+// queueing behind a global mutex.
+//
+// Each pooled pipeline owns a full ORT InferenceSession — i.e. its own copy of
+// the model weights (~86MB for MiniLM). Pool size therefore trades RAM for embed
+// parallelism: size it to the box's vCPUs (the default), not higher.
 type Embedder struct {
-	session  *hugot.Session
-	pipeline *pipelines.FeatureExtractionPipeline
-	mu       sync.Mutex
+	session *hugot.Session
+	pool    chan *pipelines.FeatureExtractionPipeline
 }
 
 // New loads the model from modelPath (a directory with model.onnx +
 // tokenizer.json + config) and returns an in-process Embedder backed by ONNX
 // Runtime. libDir is the directory holding libonnxruntime (empty = the hugot
-// platform default, e.g. /usr/lib on linux). It is built once at the composition
-// root; Close releases the session.
-func New(ctx context.Context, modelPath, libDir string) (*Embedder, error) {
+// platform default, e.g. /usr/lib on linux). poolSize is the number of
+// concurrent embed pipelines; <= 0 defaults to GOMAXPROCS. It is built once at
+// the composition root; Close releases the session and every pooled pipeline.
+//
+// Session options pin intra-op parallelism to 1 thread and disable spinning:
+// the pool already provides cross-core concurrency (one busy core per in-flight
+// embed), so per-Run intra-op threads would only oversubscribe, and spinning
+// threads would busy-wait and burn the cores the pool needs for other embeds.
+func New(ctx context.Context, modelPath, libDir string, poolSize int) (*Embedder, error) {
 	if modelPath == "" {
 		return nil, fmt.Errorf("onnx embedder: empty model path")
 	}
-	var opts []options.WithOption
+	if poolSize <= 0 {
+		poolSize = runtime.GOMAXPROCS(0)
+	}
+	opts := []options.WithOption{
+		options.WithIntraOpNumThreads(1),
+		options.WithIntraOpSpinning(false),
+	}
 	if libDir != "" {
 		opts = append(opts, options.WithOnnxLibraryPath(libDir))
 	}
@@ -62,18 +79,22 @@ func New(ctx context.Context, modelPath, libDir string) (*Embedder, error) {
 	if err != nil {
 		return nil, fmt.Errorf("onnx embedder: new ORT session (build with -tags ORT?): %w", err)
 	}
-	cfg := hugot.FeatureExtractionConfig{
-		ModelPath:    modelPath,
-		Name:         "lemon-embed",
-		OnnxFilename: onnxFilename,
-		Options:      []hugot.FeatureExtractionOption{pipelines.WithNormalization()},
+	pool := make(chan *pipelines.FeatureExtractionPipeline, poolSize)
+	for i := 0; i < poolSize; i++ {
+		cfg := hugot.FeatureExtractionConfig{
+			ModelPath:    modelPath,
+			Name:         fmt.Sprintf("lemon-embed-%d", i),
+			OnnxFilename: onnxFilename,
+			Options:      []hugot.FeatureExtractionOption{pipelines.WithNormalization()},
+		}
+		pipeline, err := hugot.NewPipeline(session, cfg)
+		if err != nil {
+			_ = session.Destroy()
+			return nil, fmt.Errorf("onnx embedder: load pipeline %d from %s: %w", i, modelPath, err)
+		}
+		pool <- pipeline
 	}
-	pipeline, err := hugot.NewPipeline(session, cfg)
-	if err != nil {
-		_ = session.Destroy()
-		return nil, fmt.Errorf("onnx embedder: load pipeline from %s: %w", modelPath, err)
-	}
-	return &Embedder{session: session, pipeline: pipeline}, nil
+	return &Embedder{session: session, pool: pool}, nil
 }
 
 // Embed returns the embedding of a single text.
@@ -94,9 +115,15 @@ func (e *Embedder) EmbedBatch(ctx context.Context, texts []string) ([][]float32,
 }
 
 func (e *Embedder) run(ctx context.Context, texts []string) ([][]float32, error) {
-	e.mu.Lock()
-	out, err := e.pipeline.RunPipeline(ctx, texts)
-	e.mu.Unlock()
+	var pipeline *pipelines.FeatureExtractionPipeline
+	select {
+	case pipeline = <-e.pool:
+	case <-ctx.Done():
+		return nil, fmt.Errorf("onnx embed: waiting for a pipeline: %w", ctx.Err())
+	}
+	defer func() { e.pool <- pipeline }()
+
+	out, err := pipeline.RunPipeline(ctx, texts)
 	if err != nil {
 		return nil, fmt.Errorf("onnx embed %d texts: %w", len(texts), err)
 	}
