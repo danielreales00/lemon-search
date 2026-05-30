@@ -63,6 +63,8 @@ components:
     in: cmd/ingest/**
   cmd-bench-runner:
     in: cmd/bench-runner/**
+  cmd-loadbench:
+    in: cmd/loadbench/**
 
 # ------- import rules -------
 # `mayDependOn` is an allowlist: anything not listed is forbidden. (There is no
@@ -166,3 +168,9 @@ deps:
   cmd-bench-runner:
     mayDependOn: [domain, config, rank, search, retrieve-postgres, embed-ollama, embed-onnx]
     canUse: [pgx, pgxpool, net-http]
+
+  # cmd-loadbench: standalone open-loop load generator. Talks to a running API
+  # over HTTP only (net/http) — no internal deps, no DB. See docs/bench/plan.md.
+  cmd-loadbench:
+    mayDependOn: []
+    canUse: [net-http]
