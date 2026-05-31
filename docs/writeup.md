@@ -11,10 +11,12 @@ _One paragraph: what shipped, p95 latency, bench pass rate, biggest call._
 
 ## Stack
 
-- Backend: Go API on Fly.io (`iad`)
+- Backend: Go API + in-process ORT embedder on AWS EC2 (`c7i.xlarge`, `us-east-1`)
 - DB: Supabase Postgres (`us-east-1`)
 - Frontend: Next.js 15 on Vercel
-- Why this combination: see [adr/0001-stack-choice.md](adr/0001-stack-choice.md).
+- Why this combination: see [adr/0001-stack-choice.md](adr/0001-stack-choice.md); the
+  API host moved Fly→EC2 (SSH/profiling of the CGo embedder, vCPUs for the embed
+  pool) in [adr/0007-api-host-ec2.md](adr/0007-api-host-ec2.md).
 
 ## Search engine
 
@@ -168,6 +170,51 @@ _Filled on Day 4 from `bench/loadtest-final.md`._
 
 Methodology: `scripts/loadtest.sh` (`hey -z 60s -c 50 -q 10`) against the
 deployed `/search` endpoint with a query pool simulating one-keystroke-per-RPS.
+
+### Short-query latency + the 1-char tradeoff (caught by the live load bench)
+
+Running the open-loop load bench (`cmd/loadbench`, from a same-region EC2 against
+the deployed box — see [bench/plan.md](bench/plan.md)) surfaced what single-query
+spot-checks hid: on the realistic search-as-you-type mix, **single-query p95 was
+~146ms — over the 100ms target** — and it was *entirely* short lexical prefixes.
+The stage split (`embed` flat at ~6ms, `sql` carrying all of it) pinned it to the
+DB, and per-query timing pinned it to 1–2 char queries: `s`=156ms, `c`=147ms,
+`b`=128ms — while everything ≥3 chars (`coffee` 73ms) and all semantic queries
+(`chill place to work` 23ms) were comfortably under.
+
+**Root cause.** `pg_trgm` similarity is useless below 3 chars: a 1-char query
+matches **0 rows** via `name % q` yet costs ~30ms to scan, and the ranker then
+computes `similarity(name, q)` for the ~1,700 rows an `ilike 'c%'` recalls — pure
+waste.
+
+**Fix (two parts, both measured).**
+
+- **Migration 0009** gates the trigram recall arm *and* the `similarity()` rank
+  term to queries ≥3 chars. Queries ≥3 chars are byte-identical — `bench-runner`
+  pass@3 held at **629/726 (87%)** before and after (exact/typo/accent all flat);
+  2-char results stayed sensible (popular prefix matches, only mid-word fuzzy
+  noise dropped). 2-char queries fell 121→70ms.
+- **Frontend min-length-2** — the client doesn't fire until the 2nd keystroke
+  (a 1-char query returns ~150 prefix-random names; useless *and* a wide recall).
+
+Together: single-query p95 **146 → ~80ms**, under target — and the throughput knee
+moved out too (cheaper queries per core).
+
+**The 1-char tradeoff — eyes open.** min-2 means you can't find a business by
+typing a single-letter *name*. We checked the data: the only 1-char "names" are
+`.` and `d` — both malformed records (a stray punctuation; a truncated "Time
+Savers"), not real searchable names — and the 2-char names (`bp`, `qr`, grocery
+codes) still work. So it costs nothing here. And it's a *frontend* gate, not a
+backend limit — the SQL still matches a 1-char query by `ilike` prefix — so if the
+data ever gained a genuine single-letter business, lowering the threshold (or
+special-casing exact 1-char name hits) restores it. We kept min-2: a deliberate,
+reversible call backed by the data, not an oversight.
+
+**What it left.** With per-query cost fixed, the remaining p95 climb under load
+(≥~20 rps) is purely Supabase Small's **2-vCPU throughput** ceiling — a separate
+compute-scaling lever (XL+ adds cores), not a query-cost problem. The bench
+attributes it cleanly because `loadbench` records the server's `sql`/`embed` split
+per request.
 
 ## Spec ambiguities + calls
 
