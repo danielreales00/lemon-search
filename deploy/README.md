@@ -30,8 +30,16 @@ Full narrative runbook: [`../docs/operations/deployment.md`](../docs/operations/
    `deploy/ec2/deploy.sh` (pull + build + restart). Done with the box?
    `INSTANCE_ID=<id> deploy/ec2/teardown.sh` stops the meter.
 
-3. **Vercel** — import the repo, root dir `web`, set
-   `NEXT_PUBLIC_API_BASE_URL=http://<ec2-host>:8080` (or the API's HTTPS URL).
+3. **HTTPS** (needed before Vercel — an HTTPS page can't call `http://`): point a
+   DNS A record at the box (an Elastic IP keeps it stable), open 80+443, then:
+   ```bash
+   ssh ... 'sudo DOMAIN=api.example.com bash /opt/lemon/lemon-search/deploy/ec2/tls-setup.sh'
+   ```
+   Caddy fetches + auto-renews a Let's Encrypt cert; the API serves at
+   `https://api.example.com`.
+
+4. **Vercel** — import the repo, root dir `web`, set
+   `NEXT_PUBLIC_API_BASE_URL=https://api.example.com`.
 
 ## Files
 
@@ -40,6 +48,7 @@ Full narrative runbook: [`../docs/operations/deployment.md`](../docs/operations/
 | `ec2/launch.sh` | provision the EC2 instance (key pair, security group, `c7i.xlarge`); dry-run unless `LAUNCH_CONFIRM=yes` |
 | `ec2/teardown.sh` | terminate the instance (+ optional SG/key cleanup) |
 | `ec2/setup.sh` | one-time box provisioning (Go, libonnxruntime, libtokenizers, model, build, systemd) |
+| `ec2/tls-setup.sh` | front the API with Caddy + auto-TLS (Let's Encrypt) on a domain pointing at the box |
 | `ec2/deploy.sh` | redeploy on a provisioned box (pull, build `-tags ORT`, restart) |
 | `ec2/lemon-api.service` | systemd unit |
 | `ec2/lemon-api.env.example` | runtime env template |
