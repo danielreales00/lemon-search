@@ -44,6 +44,7 @@ type searchResult struct {
 	PriceRange   *string  `json:"price_range"`
 	PhotoURL     *string  `json:"photo_url"`
 	IsClaimed    bool     `json:"is_claimed"`
+	FriendCount  int      `json:"friend_count"`
 	IsNew        bool     `json:"is_new"`
 	IsOpenNow    *bool    `json:"is_open_now"`
 	Score        float64  `json:"score"`
@@ -129,6 +130,7 @@ func toResult(r *rank.Result) searchResult {
 		PriceRange:   c.PriceRange,
 		PhotoURL:     c.PhotoURL,
 		IsClaimed:    c.IsClaimed,
+		FriendCount:  c.FriendCount,
 		IsNew:        c.IsNew,
 		IsOpenNow:    c.IsOpenNow,
 		Score:        score,

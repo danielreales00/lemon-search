@@ -14,6 +14,7 @@ export interface Business {
   price_range: string | null;
   photo_url: string | null;
   is_claimed: boolean;
+  friend_count: number;
   is_new: boolean;
   is_open_now: boolean | null;
   score: number;

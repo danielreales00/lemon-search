@@ -7,16 +7,13 @@ import (
 	"github.com/google/uuid"
 )
 
-// The scraped Lemon data carries no social-graph signal, so friend_count is
-// synthesized. It is deterministic in the business id, so re-ingesting the same
-// input yields identical values (the ingest upsert is idempotent).
-//
-// is_claimed is deliberately NOT synthesized: the source JSON has only ~10
-// businesses with is_claimed=true, and we keep exactly those. Real-but-sparse
-// data is high-precision signal, and graders inspect the live DB, so fabricated
-// values would misrepresent reality. The spec's "claimed = boost" is delivered
-// by the ranking weight, not by inventing rows. is_claimed is a plain
-// passthrough handled by the loader.
+// The scraped Lemon data carries no social-graph signal and only ~10 businesses
+// with a real is_claimed, so both friend_count and is_claimed are synthesized —
+// the spec explicitly asks for this ("synthesize a small friends-reacted
+// dataset"; "synthesize a claimed/unclaimed flag"), since neither has real source
+// data (Lemon is pre-launch). Both draws are deterministic in the business id, so
+// re-ingesting the same input yields identical values (the upsert is idempotent),
+// and domain-separated salts keep the signals independent.
 
 const (
 	// friendNonzeroRate is the fraction of businesses that get a nonzero
@@ -25,9 +22,20 @@ const (
 	friendNonzeroRate = 0.03
 	// friendMax is the largest synthesized friend_count; values land in 1..5.
 	friendMax = 5
+	// claimedRate is the fraction of businesses synthesized as claimed. ~a third
+	// makes the spec's "claimed gets a big boost" signal meaningfully selective
+	// without being ambient — a plausible real-marketplace claim rate.
+	claimedRate = 0.35
 	// uint32Range is 2^32, used to map a 4-byte hash slice into [0, 1).
 	uint32Range = 4294967296.0
 )
+
+// Claimed returns a deterministic synthesized claimed flag. Roughly claimedRate
+// of ids are claimed. Salt-separated from the friend draws so the two synthetic
+// signals stay independent.
+func Claimed(id uuid.UUID) bool {
+	return seed01(id.String()+":claimed") < claimedRate
+}
 
 // FriendCount returns a deterministic synthesized friends-reacted count for a
 // business. Roughly friendNonzeroRate of ids get a nonzero value; nonzero
