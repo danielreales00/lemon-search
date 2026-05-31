@@ -1,4 +1,4 @@
-name: Deploy API → Fly.io
+name: Deploy API → EC2
 
 on:
   push:
@@ -6,8 +6,7 @@ on:
     paths:
       - "api/**"
       - "config/**"
-      - "supabase/migrations/**"
-      - "fly.toml"
+      - "deploy/ec2/**"
       - ".github/workflows/deploy-api.yml"
   workflow_dispatch:
 
@@ -20,28 +19,32 @@ concurrency:
 
 jobs:
   deploy:
-    name: flyctl deploy
+    name: ssh deploy
     runs-on: ubuntu-latest
-    # Gate on CI green for the same SHA.
-    needs: []
     env:
-      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      EC2_SSH_HOST: ${{ secrets.EC2_SSH_HOST }}
+      EC2_SSH_USER: ${{ secrets.EC2_SSH_USER }}
+      EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
     steps:
-      # Fly.io isn't provisioned yet (see issue #22). Skip — rather than fail —
-      # the deploy until FLY_API_TOKEN is set, so main stays green.
-      - name: Check for Fly API token
-        id: flytoken
+      # The EC2 box (ADR-0007) isn't provisioned until the secrets are set. Skip —
+      # rather than fail — so main stays green until then. To enable, add
+      # EC2_SSH_HOST / EC2_SSH_USER / EC2_SSH_KEY (a deploy private key) to the
+      # repo's Actions secrets; the box must already be set up via deploy/ec2/setup.sh.
+      - name: Check for EC2 SSH secrets
+        id: ssh
         run: |
-          if [ -z "$FLY_API_TOKEN" ]; then
-            echo "FLY_API_TOKEN not set — skipping deploy. Provision Fly.io and add the secret to enable."
+          if [ -z "$EC2_SSH_HOST" ] || [ -z "$EC2_SSH_KEY" ]; then
+            echo "EC2_SSH_* not set — skipping deploy. Provision the box and add the secrets to enable."
             echo "present=false" >> "$GITHUB_OUTPUT"
           else
             echo "present=true" >> "$GITHUB_OUTPUT"
           fi
-      - uses: actions/checkout@v4
-        if: steps.flytoken.outputs.present == 'true'
-      - uses: superfly/flyctl-actions/setup-flyctl@master
-        if: steps.flytoken.outputs.present == 'true'
-      - name: Deploy
-        if: steps.flytoken.outputs.present == 'true'
-        run: flyctl deploy --remote-only --config fly.toml
+
+      - name: Run remote deploy
+        if: steps.ssh.outputs.present == 'true'
+        run: |
+          install -m 600 /dev/stdin /tmp/deploy_key <<< "$EC2_SSH_KEY"
+          ssh -o StrictHostKeyChecking=accept-new -i /tmp/deploy_key \
+            "${EC2_SSH_USER:-ubuntu}@${EC2_SSH_HOST}" \
+            'sudo REPO_REF=main bash /opt/lemon/lemon-search/deploy/ec2/deploy.sh'
+          rm -f /tmp/deploy_key
