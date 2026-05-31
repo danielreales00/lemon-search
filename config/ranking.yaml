@@ -70,9 +70,9 @@ archetypes:
     weights:
       distance: 0.25
       rating: 0.18
-      popularity: 0.12
+      popularity: 0.15      # raised from 0.12 — "more reactions = more confidence"
       friends: 0.12
-      claimed: 0.08
+      claimed: 0.05         # trimmed from 0.08: a tiebreaker here, not an override
       photos: 0.10
       open_status: 0.15
     open_status: hard_filter

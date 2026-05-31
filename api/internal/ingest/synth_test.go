@@ -28,9 +28,9 @@ func TestClaimedDeterministicAndDistribution(t *testing.T) {
 			claimed++
 		}
 	}
-	// claimedRate = 0.35; allow a few points of sampling slack.
+	// claimedRate = 0.20; allow a few points of sampling slack.
 	rate := float64(claimed) / n
-	if rate < 0.32 || rate > 0.38 {
+	if rate < 0.17 || rate > 0.23 {
 		t.Errorf("claimed rate = %.3f, want ~%.2f", rate, claimedRate)
 	}
 }
