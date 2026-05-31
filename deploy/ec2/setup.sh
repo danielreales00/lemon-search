@@ -14,7 +14,7 @@ set -euo pipefail
 # --- versions (keep in sync with api/go.mod) ---
 GO_VERSION="${GO_VERSION:-1.26.0}"
 TOKENIZERS_VERSION="${TOKENIZERS_VERSION:-v1.27.0}"   # daulet/tokenizers (go.mod)
-ONNXRUNTIME_VERSION="${ONNXRUNTIME_VERSION:-1.22.0}"  # validated by the smoke test below
+ONNXRUNTIME_VERSION="${ONNXRUNTIME_VERSION:-1.26.0}"  # must expose ORT API ≥ the onnxruntime_go ask (v1.30.1 wants API 25); smoke test below catches a mismatch
 REPO_URL="${REPO_URL:-https://github.com/danielreales00/lemon-search.git}"
 REPO_REF="${REPO_REF:-main}"
 

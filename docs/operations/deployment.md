@@ -79,7 +79,8 @@ narrative. Order: **Supabase → EC2 → Vercel.**
 **Native-lib recipe** (what `setup.sh` automates, pinned to `api/go.mod`): the
 in-process ORT embedder is CGo + glibc — `libtokenizers.a` (daulet/tokenizers
 `v1.27.0`) static-linked with `-tags ORT CGO_ENABLED=1`, `libonnxruntime.so`
-(`v1.22.0`, parameterizable) dlopen'd from `LEMON_ONNX_RUNTIME_DIR`, and the
+(`v1.26.0` — must expose an ORT API version ≥ what `onnxruntime_go` requests;
+parameterizable) dlopen'd from `LEMON_ONNX_RUNTIME_DIR`, and the
 bundled `all-MiniLM-L6-v2` model (`model.onnx` + `tokenizer.json`, ~86MB) at
 `LEMON_ONNX_MODEL_PATH`.
 
