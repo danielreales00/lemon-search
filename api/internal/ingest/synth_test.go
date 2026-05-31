@@ -13,6 +13,28 @@ func genID(i int) uuid.UUID {
 	return uuid.NewSHA1(uuid.NameSpaceDNS, []byte(strconv.Itoa(i)))
 }
 
+func TestClaimedDeterministicAndDistribution(t *testing.T) {
+	t.Parallel()
+
+	const n = 10000
+	claimed := 0
+	for i := 0; i < n; i++ {
+		id := genID(i)
+		want := Claimed(id)
+		if Claimed(id) != want {
+			t.Fatalf("Claimed(%s) not stable", id)
+		}
+		if want {
+			claimed++
+		}
+	}
+	// claimedRate = 0.35; allow a few points of sampling slack.
+	rate := float64(claimed) / n
+	if rate < 0.32 || rate > 0.38 {
+		t.Errorf("claimed rate = %.3f, want ~%.2f", rate, claimedRate)
+	}
+}
+
 func TestFriendCountDeterministic(t *testing.T) {
 	t.Parallel()
 

@@ -108,7 +108,8 @@ func (p *producer) process(raw json.RawMessage, s *stats) (ingest.Business, bool
 	case ingest.TaxonomyKeep:
 	}
 
-	if rb.IsClaimed {
+	claimed := ingest.Claimed(rb.ID)
+	if claimed {
 		s.claimedTrue++
 	}
 	friends := ingest.FriendCount(rb.ID)
@@ -116,12 +117,12 @@ func (p *producer) process(raw json.RawMessage, s *stats) (ingest.Business, bool
 		s.friendNonzero++
 	}
 
-	return toBusiness(rb, tax, friends), true
+	return toBusiness(rb, tax, claimed, friends), true
 }
 
 // toBusiness assembles the final row from the sanitized record, the normalized
-// taxonomy, and the synthesized friend count.
-func toBusiness(rb ingest.RawBusiness, tax ingest.Taxonomy, friends int) ingest.Business {
+// taxonomy, and the synthesized claimed flag + friend count.
+func toBusiness(rb ingest.RawBusiness, tax ingest.Taxonomy, claimed bool, friends int) ingest.Business {
 	return ingest.Business{
 		ID:                rb.ID,
 		Name:              rb.Name,
@@ -142,7 +143,7 @@ func toBusiness(rb ingest.RawBusiness, tax ingest.Taxonomy, friends int) ingest.
 		About:             rb.About,
 		UniversalTags:     rb.UniversalTags,
 		SpecificTags:      rb.SpecificTags,
-		IsClaimed:         rb.IsClaimed,
+		IsClaimed:         claimed,
 		FriendCount:       friends,
 	}
 }

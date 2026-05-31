@@ -147,6 +147,6 @@ func report(s stats, elapsed time.Duration) string {
 		fmt.Sprintf("  dropped (cat empty): %6d\n", s.droppedCatEmpty) +
 		fmt.Sprintf("  bucketed (Other):    %6d\n", s.bucketedOther) +
 		fmt.Sprintf("  loaded:              %6d\n", s.loaded) +
-		fmt.Sprintf("  is_claimed=true (source): %6d (%.2f%%)\n", s.claimedTrue, pct(s.claimedTrue)) +
+		fmt.Sprintf("  is_claimed=true (synth):  %6d (%.2f%%)\n", s.claimedTrue, pct(s.claimedTrue)) +
 		fmt.Sprintf("  friend_count > 0:    %6d (%.2f%%)\n", s.friendNonzero, pct(s.friendNonzero))
 }

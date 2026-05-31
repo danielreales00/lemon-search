@@ -72,6 +72,11 @@ function BusinessRow({ business, rank }: BusinessRowProps): React.JSX.Element {
             </span>
             {business.is_new && <span className="chip chip--new">New</span>}
             {business.is_claimed && <span className="chip chip--claimed">Claimed</span>}
+            {business.friend_count > 0 && (
+              <span className="chip chip--friends">
+                👥 {business.friend_count} friend{business.friend_count !== 1 ? 's' : ''}
+              </span>
+            )}
           </div>
         </div>
         <div className="result-meta">

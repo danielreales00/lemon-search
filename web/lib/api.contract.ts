@@ -21,6 +21,7 @@ export const contractSample = {
       price_range: '$$',
       photo_url: 'https://example.com/photo.jpg',
       is_claimed: true,
+      friend_count: 2,
       is_new: false,
       is_open_now: true,
       score: 0.81,

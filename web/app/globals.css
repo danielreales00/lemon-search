@@ -426,6 +426,11 @@ body::before {
   color: #1d4ed8;
 }
 
+.chip--friends {
+  background: #f3e8ff;
+  color: #7c3aed;
+}
+
 .chip--distance {
   background: var(--line);
   color: var(--muted);
