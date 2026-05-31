@@ -1,5 +1,5 @@
 {
-  "_note": "Weighted query corpus for the open-loop load bench (cmd/loadbench). Weights model a search-as-you-type distribution: short prefixes dominate (every keystroke fires a debounced request), category words are common, vibe/intent phrases are the expensive-but-interesting minority. The generator samples q by weight and pairs each with a random point + now, so plans don't degenerate into one cached shape. Kinds are for reporting only.",
+  "_note": "Weighted query corpus for the open-loop load bench (cmd/loadbench). Weights model a search-as-you-type distribution: short prefixes dominate (every keystroke fires a debounced request), category words are common, vibe/intent phrases are the expensive-but-interesting minority. Minimum length is 2 chars — the web client doesn't fire a search until the 2nd keystroke (a 1-char query matches ~thousands of names by prefix; useless results + needless cost). The generator samples q by weight and pairs each with a random point + now, so plans don't degenerate into one cached shape. Kinds are for reporting only.",
   "points": [
     { "lat": 25.7742, "lng": -80.1937, "label": "downtown" },
     { "lat": 25.7617, "lng": -80.1918, "label": "brickell" },
@@ -16,18 +16,14 @@
     "2026-05-31T02:00:00-04:00"
   ],
   "queries": [
-    { "q": "c", "weight": 6, "kind": "prefix" },
     { "q": "co", "weight": 7, "kind": "prefix" },
     { "q": "cof", "weight": 6, "kind": "prefix" },
     { "q": "coff", "weight": 5, "kind": "prefix" },
-    { "q": "s", "weight": 5, "kind": "prefix" },
     { "q": "su", "weight": 6, "kind": "prefix" },
     { "q": "sus", "weight": 5, "kind": "prefix" },
     { "q": "sush", "weight": 4, "kind": "prefix" },
-    { "q": "b", "weight": 5, "kind": "prefix" },
     { "q": "ba", "weight": 6, "kind": "prefix" },
     { "q": "bar", "weight": 5, "kind": "prefix" },
-    { "q": "g", "weight": 4, "kind": "prefix" },
     { "q": "gy", "weight": 5, "kind": "prefix" },
     { "q": "gym", "weight": 4, "kind": "prefix" },
     { "q": "ta", "weight": 5, "kind": "prefix" },

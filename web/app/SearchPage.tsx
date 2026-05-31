@@ -26,7 +26,10 @@ export function SearchPage(): React.JSX.Element {
   // the UI feels instant. Category cards just call setQuery — same path.
   useEffect(() => {
     const q = query.trim();
-    if (q === '') {
+    // A 1-char query matches ~thousands of names by prefix — useless results and
+    // a needlessly expensive recall. Wait for the 2nd char (standard for search-
+    // as-you-type); show the category suggestions until then.
+    if (q.length < 2) {
       setState({ status: 'idle' });
       return;
     }
