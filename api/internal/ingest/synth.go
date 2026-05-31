@@ -22,10 +22,10 @@ const (
 	friendNonzeroRate = 0.03
 	// friendMax is the largest synthesized friend_count; values land in 1..5.
 	friendMax = 5
-	// claimedRate is the fraction of businesses synthesized as claimed. ~a third
-	// makes the spec's "claimed gets a big boost" signal meaningfully selective
-	// without being ambient — a plausible real-marketplace claim rate.
-	claimedRate = 0.35
+	// claimedRate is the fraction of businesses synthesized as claimed. ~a fifth
+	// keeps claimed a meaningful minority signal (the spec's "big boost") without
+	// dominating result sets — at a third it crowded the top of every query.
+	claimedRate = 0.20
 	// uint32Range is 2^32, used to map a 4-byte hash slice into [0, 1).
 	uint32Range = 4294967296.0
 )

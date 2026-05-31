@@ -338,7 +338,7 @@ Signals (literal mode):
 ```
 distance      = max(1 - 1.5/48.28, 0)         = 0.969
 rating        = 9.2/10                         = 0.920
-popularity    = log(421)/log(10001)            = 0.654
+popularity    = log(421)/log(10001)            = 0.656
 friends       = min(2/5, 1)                    = 0.400
 claimed       = 1.0                            = 1.000
 photos        = 1.0  (>= 3)                    = 1.000
@@ -350,13 +350,13 @@ Weights for `low_stakes_fast_nearby`:
 ```
 distance: 0.25  · 0.969 = 0.2422
 rating:   0.18  · 0.920 = 0.1656
-popular:  0.12  · 0.654 = 0.0785
+popular:  0.15  · 0.656 = 0.0984
 friends:  0.12  · 0.400 = 0.0480
-claimed:  0.08  · 1.000 = 0.0800
+claimed:  0.05  · 1.000 = 0.0500
 photos:   0.10  · 1.000 = 0.1000
 open:     0.15  · 1.000 = 0.1500
                           ──────
-score                    ≈ 0.8643
+score                    ≈ 0.8542
 ```
 
 Compare to a similar sushi restaurant 4 km away with `google_review_count = 50`
@@ -369,14 +369,14 @@ friends       = 0
 … others equal …
 
 distance: 0.25 · 0.917 = 0.2293
-popular:  0.12 · 0.426 = 0.0511
+popular:  0.15 · 0.426 = 0.0639
 friends:  0
 … others same …
 
-score ≈ 0.7704
+score ≈ 0.7588
 ```
 
-First candidate wins by ~0.09 — distance dominates within the
+First candidate wins by ~0.10 — distance dominates within the
 neighborhood-tight `low_stakes` weights, but the `popularity` and
 `friends` contributions matter as differentiators between two close
 restaurants.

@@ -45,7 +45,7 @@ func TestRunWorkedExample(t *testing.T) {
 	if len(got) != 1 {
 		t.Fatalf("expected 1 result, got %d", len(got))
 	}
-	const want = 0.8643
+	const want = 0.8542
 	if math.Abs(got[0].Score-want) > 0.001 {
 		t.Fatalf("worked-example score = %v, want ≈ %v", got[0].Score, want)
 	}
