@@ -84,9 +84,14 @@ parameterizable) dlopen'd from `LEMON_ONNX_RUNTIME_DIR`, and the
 bundled `all-MiniLM-L6-v2` model (`model.onnx` + `tokenizer.json`, ~86MB) at
 `LEMON_ONNX_MODEL_PATH`.
 
-**TLS / public HTTPS.** The service serves plain HTTP on :8080. For a public URL,
-either front it with Caddy (`caddy reverse-proxy --to :8080`, auto-TLS) or an
-ALB, or point the web app straight at `http://<ec2-host>:8080` for a quick demo.
+**TLS / public HTTPS.** The service serves plain HTTP on :8080; the Vercel web app
+needs HTTPS (an HTTPS page can't fetch `http://`). Allocate an Elastic IP (stable
+across reboots), point a DNS A record at it, open 80+443 in the security group,
+then run `deploy/ec2/tls-setup.sh` on the box — it installs Caddy and fronts the
+API with an auto-renewing Let's Encrypt cert:
+```bash
+ssh ... 'sudo DOMAIN=api.example.com bash /opt/lemon/lemon-search/deploy/ec2/tls-setup.sh'
+```
 
 ## Vercel
 
