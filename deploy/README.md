@@ -17,14 +17,18 @@ Full narrative runbook: [`../docs/operations/deployment.md`](../docs/operations/
    `apply-migrations.sh` is idempotent; `seed.sh` copies the ~23k businesses +
    embeddings from the already-seeded local DB (no re-embedding).
 
-2. **EC2** — launch a `c7i.xlarge` (Ubuntu 24.04, x86-64), then on the box:
+2. **EC2** — launch the box (needs the `aws` CLI authenticated), then provision it:
    ```bash
-   sudo REPO_REF=main bash deploy/ec2/setup.sh   # Go + native libs + model + build + service
-   sudoedit /etc/lemon/lemon-api.env             # LEMON_DATABASE_URL + CORS origin
-   sudo systemctl start lemon-api
+   LAUNCH_CONFIRM=yes deploy/ec2/launch.sh        # key pair + SG + c7i.xlarge; prints the ssh cmd
+   ssh -i ~/.ssh/lemon-api.pem ubuntu@<host> \
+     'git clone https://github.com/danielreales00/lemon-search.git && sudo REPO_REF=main bash lemon-search/deploy/ec2/setup.sh'
+   ssh ... 'sudoedit /etc/lemon/lemon-api.env'    # LEMON_DATABASE_URL + CORS origin
+   ssh ... 'sudo systemctl start lemon-api'
    ```
-   `setup.sh` ends with an ORT embed smoke test that validates the native-lib
-   pairing. Redeploys later: `deploy/ec2/deploy.sh` (pull + build + restart).
+   `launch.sh` is a dry-run without `LAUNCH_CONFIRM=yes`. `setup.sh` ends with an
+   ORT embed smoke test that validates the native-lib pairing. Redeploys later:
+   `deploy/ec2/deploy.sh` (pull + build + restart). Done with the box?
+   `INSTANCE_ID=<id> deploy/ec2/teardown.sh` stops the meter.
 
 3. **Vercel** — import the repo, root dir `web`, set
    `NEXT_PUBLIC_API_BASE_URL=http://<ec2-host>:8080` (or the API's HTTPS URL).
@@ -33,6 +37,8 @@ Full narrative runbook: [`../docs/operations/deployment.md`](../docs/operations/
 
 | Path | What |
 |---|---|
+| `ec2/launch.sh` | provision the EC2 instance (key pair, security group, `c7i.xlarge`); dry-run unless `LAUNCH_CONFIRM=yes` |
+| `ec2/teardown.sh` | terminate the instance (+ optional SG/key cleanup) |
 | `ec2/setup.sh` | one-time box provisioning (Go, libonnxruntime, libtokenizers, model, build, systemd) |
 | `ec2/deploy.sh` | redeploy on a provisioned box (pull, build `-tags ORT`, restart) |
 | `ec2/lemon-api.service` | systemd unit |
