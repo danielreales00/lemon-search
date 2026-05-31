@@ -1,263 +1,169 @@
 # Deployment runbook
 
-Three deploy targets. Each owns one piece of the system.
+Three deploy targets. Each owns one piece of the system (ADR-0007).
 
 | Target | Hosts | Region |
 |---|---|---|
 | Supabase | Postgres 15 (the DB) | `us-east-1` |
-| Fly.io | Go API binary (`cmd/api`) | `iad` |
+| AWS EC2 | Go API binary (`cmd/api`) + in-process ORT embedder | `us-east-1` |
 | Vercel | Next.js FE (`web/`) | edge (global) |
 
-Same-region pairing of Fly `iad` + Supabase `us-east-1` keeps the Go ↔ DB
-hop ≤ 10ms.
+EC2 (`c7i.xlarge`) + Supabase both in `us-east-1` keep the Go ↔ DB hop ≤ 10ms.
+The API host moved Fly.io → EC2 for SSH/profiling of the CGo embedder and to use
+the box's vCPUs via the embed pool — see [ADR-0007](../adr/0007-api-host-ec2.md)
+for the rationale + capacity model.
 
-## First-time setup
+The runnable scripts live in [`../../deploy/`](../../deploy/); this is the
+narrative. Order: **Supabase → EC2 → Vercel.**
 
-### Supabase
+## Supabase
 
-1. Create a project at <https://supabase.com/dashboard/projects>. Region
-   `us-east-1` (close-to-`iad`). Save the DB password to a vault.
-2. From **Settings → Database**, copy the **direct** connection string
-   (port 5432, not the pooler). Add to local `.env.local` as
-   `LEMON_DATABASE_URL` and to GitHub Actions Secrets.
-3. Apply migrations:
+1. Create a **Pro** project at <https://supabase.com/dashboard/projects>, region
+   `us-east-1`. Pro (not Free): Free auto-pauses after ~7 days — a paused DB when
+   a grader opens the link is the worst failure mode. Save the DB password.
+   Sizing: **Small** compute is plenty for the demo; co-scale to 2XL–4XL only for
+   the ceiling load test, then back down ([bench plan](../bench/plan.md)).
+2. From **Settings → Database**, copy the **direct** connection string (port
+   5432, not the pooler). This is `LEMON_DATABASE_URL`.
+3. Apply migrations (idempotent):
    ```bash
-   for f in supabase/migrations/*.sql; do
-     psql "$LEMON_DATABASE_URL" -v ON_ERROR_STOP=1 -f "$f"
-   done
+   LEMON_DATABASE_URL='<direct url>' deploy/supabase/apply-migrations.sh
+   # expect extensions: cube earthdistance pg_trgm vector
    ```
-4. Create the `lemon_grader` password (the migration creates the role
-   without a password):
+4. Seed the ~23k businesses + embeddings. Fast path — copy from the already-
+   seeded local dev DB (no re-embedding; vectors transfer as-is):
+   ```bash
+   SOURCE_DATABASE_URL='postgresql://postgres:postgres@127.0.0.1:54322/postgres' \
+   LEMON_DATABASE_URL='<supabase direct url>' \
+     deploy/supabase/seed.sh
+   ```
+   No local DB? Seed fresh from JSON instead (needs Ollama for the embed pass,
+   which `cmd/ingest` uses — its vectors match the ONNX query path per the
+   parity test):
+   ```bash
+   LEMON_DATABASE_URL='<supabase>' go run ./cmd/ingest -input businesses-<date>.json
+   LEMON_DATABASE_URL='<supabase>' go run ./cmd/ingest -embed
+   ```
+5. Set the grader role password (the migration creates the role without one) and
+   share `(lemon_grader, password)` over a secure channel — this is the spec's
+   "read access shared" deliverable:
    ```sql
-   ALTER ROLE lemon_grader WITH PASSWORD '<a-strong-password>';
-   ```
-   Share the (user, password) pair with the grader via secure channel.
-5. Confirm extensions present:
-   ```sql
-   \dx
-   -- expect: pg_trgm, cube, earthdistance
+   alter role lemon_grader with password '<a-strong-password>';
    ```
 
-### Fly.io
+## EC2
 
-1. `brew install flyctl` and `flyctl auth login`.
-2. From repo root: `flyctl launch --no-deploy --region iad --copy-config`
-   (interactively pick the app name `lemon-search-api`). This writes
-   `fly.toml`.
-3. Set secrets:
+1. Launch a **`c7i.xlarge`** (4 vCPU / 8 GB), **Ubuntu 24.04 LTS x86-64**,
+   `us-east-1`. Security group: inbound 22 (SSH, your IP) + 8080 (or 443 if you
+   add TLS — see below). Attach a key pair.
+2. SSH in and provision — installs Go, the two native libs (`libonnxruntime`
+   dlopen'd + `libtokenizers.a` static-linked), the embedding model, builds the
+   API with `-tags ORT`, and installs the systemd service:
    ```bash
-   flyctl secrets set \
-     LEMON_DATABASE_URL='<direct supabase url>' \
-     LEMON_CORS_ORIGIN='https://<your-vercel-url>' \
-     LEMON_DEFAULT_LAT='25.7741728' \
-     LEMON_DEFAULT_LNG='-80.19362' \
-     LEMON_RANKING_CONFIG='/app/config/ranking.yaml'
+   git clone https://github.com/danielreales00/lemon-search.git
+   sudo REPO_REF=main bash lemon-search/deploy/ec2/setup.sh
    ```
-4. Generate a deploy token and add as `FLY_API_TOKEN` in GitHub Actions
-   Secrets:
+   It ends with an ORT embed smoke test that validates the native-lib pairing
+   (an onnxruntime/`onnxruntime_go` mismatch fails loudly here, not at runtime).
+3. Fill the runtime env, then start:
    ```bash
-   flyctl tokens create deploy
+   sudoedit /etc/lemon/lemon-api.env   # LEMON_DATABASE_URL + LEMON_CORS_ALLOW_ORIGIN
+   sudo systemctl start lemon-api
+   curl localhost:8080/readyz && curl 'localhost:8080/search?q=sushi'
    ```
-5. First deploy:
-   ```bash
-   flyctl deploy
-   ```
-   Verify: `curl https://lemon-search-api.fly.dev/healthz` → `{"status":"ok"}`.
+   Key env (full template: `deploy/ec2/lemon-api.env.example`):
+   `LEMON_DATABASE_URL`, `LEMON_CORS_ALLOW_ORIGIN=https://<vercel-url>`,
+   `LEMON_FF_SEMANTIC=true`, `LEMON_EMBED_BACKEND=onnx`, `LEMON_EMBED_POOL_SIZE=4`,
+   `LEMON_ONNX_MODEL_PATH`, `LEMON_ONNX_RUNTIME_DIR=/usr/lib`.
 
-### Vercel
+**Native-lib recipe** (what `setup.sh` automates, pinned to `api/go.mod`): the
+in-process ORT embedder is CGo + glibc — `libtokenizers.a` (daulet/tokenizers
+`v1.27.0`) static-linked with `-tags ORT CGO_ENABLED=1`, `libonnxruntime.so`
+(`v1.22.0`, parameterizable) dlopen'd from `LEMON_ONNX_RUNTIME_DIR`, and the
+bundled `all-MiniLM-L6-v2` model (`model.onnx` + `tokenizer.json`, ~86MB) at
+`LEMON_ONNX_MODEL_PATH`.
 
-1. From <https://vercel.com/new>, import the GitHub repo. Set:
+**TLS / public HTTPS.** The service serves plain HTTP on :8080. For a public URL,
+either front it with Caddy (`caddy reverse-proxy --to :8080`, auto-TLS) or an
+ALB, or point the web app straight at `http://<ec2-host>:8080` for a quick demo.
+
+## Vercel
+
+1. From <https://vercel.com/new>, import the repo:
    - **Root directory**: `web`
    - **Framework**: Next.js (auto-detected)
-   - **Environment variables**:
-     - `NEXT_PUBLIC_API_BASE_URL = https://lemon-search-api.fly.dev`
-2. Add a deploy branch (typically `main`). Branch protection on GitHub
-   handles which commits land there.
-3. First deploy is automatic on the first push.
+   - **Env**: `NEXT_PUBLIC_API_BASE_URL = https://<api-host>` (or `http://<ec2-ip>:8080`)
+2. Production branch `main`; first deploy is automatic on push.
+3. After it deploys, set `LEMON_CORS_ALLOW_ORIGIN` on the box to the Vercel
+   origin and `sudo systemctl restart lemon-api`.
 
-### GitHub Actions secrets
+## GitHub Actions secrets
 
 | Secret | Used by | Value |
 |---|---|---|
-| `FLY_API_TOKEN` | `deploy-api.yml` | from `flyctl tokens create deploy` |
-| `LEMON_DATABASE_URL` | `ci.yml` migrations job (optional) | the Supabase direct URL |
-
-## fly.toml (reference)
-
-```toml
-app = "lemon-search-api"
-primary_region = "iad"
-
-[build]
-  dockerfile = "Dockerfile"
-
-[env]
-  LEMON_API_PORT = "8080"
-
-[http_service]
-  internal_port = 8080
-  force_https = true
-  auto_stop_machines = "stop"
-  auto_start_machines = true
-  min_machines_running = 1
-  processes = ["app"]
-
-  [[http_service.checks]]
-    grace_period = "10s"
-    interval = "30s"
-    method = "GET"
-    timeout = "5s"
-    path = "/readyz"
-
-[[vm]]
-  cpu_kind = "shared"
-  cpus = 2
-  memory_mb = 512
-```
-
-## Dockerfile (reference)
-
-The in-process ONNX embedder (ADR-0006 E6) uses hugot's **ORT backend** — native
-onnxruntime kernels (~2ms/embed). That makes the build CGo + glibc with two
-native libs, so the image is **debian-based, not alpine/static**:
-
-- build-time static link: **`libtokenizers.a`** (daulet/tokenizers, pinned to the
-  go.mod version) + `-tags ORT`, `CGO_ENABLED=1`.
-- runtime dlopen: **`libonnxruntime.so`** at `LEMON_ONNX_RUNTIME_DIR` (default
-  `/usr/lib`).
-- bundled model: `all-MiniLM-L6-v2` (`model.onnx` + `tokenizer.json`, ~86MB,
-  gitignored — fetched at build) at `LEMON_ONNX_MODEL_PATH`.
-
-> Owned + first-validated by the deploy chunk (#22). Verified locally on
-> darwin/arm64 (parity cosine 1.0, ON p95 ~17ms); the linux image below is the
-> target recipe, not yet CI-built.
-
-```dockerfile
-# api/Dockerfile
-FROM golang:1.26-bookworm AS build
-ARG TOKENIZERS_VERSION=v1.27.0   # keep in sync with go.mod daulet/tokenizers
-WORKDIR /src
-# native build dep: prebuilt Rust tokenizer static lib
-ADD https://github.com/daulet/tokenizers/releases/download/${TOKENIZERS_VERSION}/libtokenizers.linux-amd64.tar.gz /tmp/
-RUN tar xzf /tmp/libtokenizers.linux-amd64.tar.gz -C /usr/lib
-COPY api/go.mod api/go.sum ./
-RUN go mod download
-COPY api/ ./
-RUN CGO_ENABLED=1 CGO_LDFLAGS="-L/usr/lib" \
-    go build -tags ORT -trimpath -ldflags='-s -w' -o /out/api ./cmd/api
-
-FROM debian:bookworm-slim
-ARG ONNXRUNTIME_VERSION=1.22.0
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates tzdata curl \
- && rm -rf /var/lib/apt/lists/*
-# runtime dep: onnxruntime shared lib (dlopen'd by the ORT backend)
-RUN curl -fsSL "https://github.com/microsoft/onnxruntime/releases/download/v${ONNXRUNTIME_VERSION}/onnxruntime-linux-x64-${ONNXRUNTIME_VERSION}.tgz" \
-    | tar xz -C /tmp \
- && cp /tmp/onnxruntime-linux-x64-${ONNXRUNTIME_VERSION}/lib/libonnxruntime.so* /usr/lib/ \
- && ln -sf /usr/lib/libonnxruntime.so.${ONNXRUNTIME_VERSION} /usr/lib/libonnxruntime.so
-# embedding model (fetched at build; gitignored, ~86MB)
-RUN mkdir -p /app/models/all-MiniLM-L6-v2 \
- && for f in model.onnx tokenizer.json config.json tokenizer_config.json vocab.txt special_tokens_map.json; do \
-      curl -fsSL -o /app/models/all-MiniLM-L6-v2/$f \
-        https://huggingface.co/KnightsAnalytics/all-MiniLM-L6-v2/resolve/main/$f; \
-    done
-COPY --from=build /out/api /app/api
-COPY config/ /app/config/
-ENV LEMON_FF_SEMANTIC=true \
-    LEMON_EMBED_BACKEND=onnx \
-    LEMON_ONNX_MODEL_PATH=/app/models/all-MiniLM-L6-v2 \
-    LEMON_ONNX_RUNTIME_DIR=/usr/lib
-EXPOSE 8080
-ENTRYPOINT ["/app/api"]
-```
+| `EC2_SSH_HOST` | `deploy-api.yml` | the box's public DNS/IP |
+| `EC2_SSH_USER` | `deploy-api.yml` | `ubuntu` (default) |
+| `EC2_SSH_KEY` | `deploy-api.yml` | a deploy private key authorized on the box |
+| `LEMON_DATABASE_URL` | `ci.yml` (optional) | the Supabase direct URL |
 
 ## Deploy flow
 
-Push to `main` triggers:
+Push to `main`:
 
-1. CI (`.github/workflows/ci.yml`) runs everything (lint, test, build,
-   migrations check, secrets scan, etc.).
-2. After CI green: `.github/workflows/deploy-api.yml` runs `flyctl deploy`.
-   Path-filtered so docs-only changes don't redeploy the API.
-3. Vercel auto-deploys the `web/` build on the same push (its own pipeline,
-   not via GitHub Actions).
+1. CI (`ci.yml`) runs lint/test/build/migrations/secrets.
+2. `deploy-api.yml` SSHes to the box and runs `deploy/ec2/deploy.sh` (git pull →
+   build `-tags ORT` → `systemctl restart`). Path-filtered so docs-only changes
+   don't redeploy. **Skips safely** until the `EC2_SSH_*` secrets exist.
+3. Vercel auto-deploys `web/` on the same push (its own pipeline).
 
-End-of-deploy checks (run manually after the first deploy of any change):
+Post-deploy checks:
 
-- `curl https://lemon-search-api.fly.dev/healthz`
-- `curl https://lemon-search-api.fly.dev/readyz`
-- `curl https://lemon-search-api.fly.dev/version` — confirm SHA matches
-- `curl 'https://lemon-search-api.fly.dev/search?q=sushi'` — sanity check
+- `curl http://<host>:8080/healthz` · `/readyz` · `/version` (SHA matches)
+- `curl 'http://<host>:8080/search?q=sushi'` — sanity
 - Open the Vercel URL, type a query, verify results render
 
 ## Rollback
 
-### API (Fly.io)
+**API**: redeploy a known-good SHA — `ssh <box> 'sudo REPO_REF=<sha> bash
+/opt/lemon/lemon-search/deploy/ec2/deploy.sh'`. The build is fast; systemd
+restarts in place. (`Restart=always` also recovers a crash automatically.)
 
-```bash
-flyctl releases             # list recent releases
-flyctl deploy --image registry.fly.io/lemon-search-api:<old-tag>
-```
+**FE (Vercel)**: dashboard → Deployments → pick a green one → **Promote to
+Production**.
 
-Or, equivalent via UI: <https://fly.io/apps/lemon-search-api/monitoring>
-→ rollback button on the release row.
-
-### FE (Vercel)
-
-Promote a previous deployment via the Vercel dashboard
-(`https://vercel.com/<org>/lemon-search-web/deployments`): pick a
-green deployment, click **Promote to Production**.
-
-### Database
-
-Migrations are forward-only. To "rollback" a column, write a new
-migration that drops it. **Do not** edit a merged migration.
-
-To restore data: Supabase keeps daily backups (7-day retention on the
-free tier). Restore via the Supabase dashboard → Database → Backups.
+**Database**: migrations are forward-only — to "undo" a column, write a new
+migration that drops it; never edit a merged one. Data restore: Supabase keeps
+daily backups (dashboard → Database → Backups).
 
 ## Emergency stop
 
-Fly: `flyctl scale count 0 --yes` (sets running count to 0; new requests
-get 502 from Fly's edge). Re-enable with `flyctl scale count 1`.
-
-Vercel: pause the project via the dashboard, or remove the production
-domain.
-
-Supabase: pause the project from the dashboard (Settings → General).
-The DB stops accepting connections.
+- **API**: `sudo systemctl stop lemon-api` (new requests get connection-refused;
+  put it behind the proxy if you want a clean 503). Re-enable: `systemctl start`.
+- **Vercel**: pause the project in the dashboard, or remove the production domain.
+- **Supabase**: pause the project (Settings → General) — the DB stops accepting
+  connections.
 
 ## Common operational questions
 
-**Q: API is slow, what do I check?**
+**API is slow — what do I check?**
 
-1. `flyctl logs` — look for slow `sql_ms`. If high: check `EXPLAIN ANALYZE`
-   on the slow query.
-2. `flyctl status` — confirm 1 machine running, not in `pending`.
-3. Supabase dashboard → Database → Query Performance — top queries by
-   time.
-4. [observability.md](observability.md) for what the timings mean.
+1. `journalctl -u lemon-api -f` — look for slow `sql_ms` in the request logs.
+2. `systemctl status lemon-api` — confirm it's `active (running)`, not flapping.
+3. EC2 per-core CPU (`htop`) — is the embed pool saturating all 4 vCPUs?
+4. Supabase dashboard → Database → Query Performance — top queries by time.
+5. The [load-bench](../bench/plan.md) harness attributes a degrading p95 to the
+   API box vs the DB; [observability.md](observability.md) explains the timings.
 
-**Q: Bench pass rate dropped — how do I diagnose?**
+**How do I share schema access with a grader?**
 
-1. `scripts/bench-runner --diff <yesterday's results>` — which queries
-   regressed?
-2. Hit the API directly for a regressed query; inspect the JSON timings
-   and result IDs.
-3. If the regression came from a config change: revert
-   `config/ranking.yaml` and confirm.
-4. If from a ranker code change: re-run the unit tests that cover the
-   relevant ranker step.
-
-**Q: How do I share schema access with a grader?**
-
-1. Confirm the `lemon_grader` role exists and has a password set.
-2. Share via password manager link (1Password / Bitwarden) or in-thread
-   secure note. Include the project ref + connection string.
+1. Confirm `lemon_grader` exists with a password set (Supabase step 5).
+2. Share `(lemon_grader, password)` + the project ref/connection string via a
+   password manager link or secure note.
 
 ## Cross-references
 
-- CI/CD configs: `.github/workflows/`
+- Deploy scripts: [`../../deploy/`](../../deploy/)
+- Capacity model + host rationale: [../adr/0007-api-host-ec2.md](../adr/0007-api-host-ec2.md)
+- Load-bench plan: [../bench/plan.md](../bench/plan.md)
 - Schema reference: [../data/schema.md](../data/schema.md)
 - Observability: [observability.md](observability.md)
-- Stack ADR: [../adr/0001-stack-choice.md](../adr/0001-stack-choice.md)

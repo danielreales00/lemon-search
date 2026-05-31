@@ -1,0 +1,26 @@
+[Unit]
+Description=Lemon Search API (Go + in-process ORT embedder)
+Documentation=https://github.com/danielreales00/lemon-search/blob/main/docs/operations/deployment.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=lemon
+Group=lemon
+WorkingDirectory=/opt/lemon/lemon-search
+EnvironmentFile=/etc/lemon/lemon-api.env
+ExecStart=/opt/lemon/lemon-api
+Restart=always
+RestartSec=2
+# The ORT embedder dlopens libonnxruntime from here.
+Environment=LEMON_ONNX_RUNTIME_DIR=/usr/lib
+# Light hardening — the process only needs to read its own tree + reach Postgres.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/opt/lemon
+
+[Install]
+WantedBy=multi-user.target
