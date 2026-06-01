@@ -36,6 +36,14 @@
             ]
           },
           {
+            "group": "Engineering deep-dive",
+            "pages": [
+              "decisions",
+              "quality",
+              "known-gaps"
+            ]
+          },
+          {
             "group": "Build on it",
             "pages": [
               "extending",

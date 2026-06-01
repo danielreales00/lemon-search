@@ -1,0 +1,230 @@
+---
+title: "Quality and benchmarks"
+description: "The two evaluation harnesses, the measured tables, the engine A/B, and the speed and load numbers."
+---
+
+Search quality and speed are claims, and claims need numbers. This page collects
+the measured results: how often the right business is reachable (findability),
+whether the order feels right (ranking quality), how the search engine choice
+held up in a head-to-head, and how fast the system is under a single query and
+under load. Nothing here is asserted; every number comes from a harness in the
+repo that you can re-run.
+
+## Headline numbers
+
+<CardGroup cols={3}>
+  <Card title="93% pass@3" icon="bullseye">
+    Overall findability across 726 generated cases (674/726). The right business
+    is in the top 3.
+  </Card>
+  <Card title="~80ms p95" icon="bolt">
+    Single-query server-side latency (p50 ~50ms), under the 100ms target.
+  </Card>
+  <Card title="Tied at 86%" icon="scale-balanced">
+    Postgres versus a tuned Meilisearch in the pre-commit A/B, before the
+    prefix-pin fix lifted Postgres to 93%.
+  </Card>
+</CardGroup>
+
+## Findability: is the right business reachable
+
+The first harness asks a yes/no question: for a query with a known right answer,
+is that answer in the top 3 results? It runs `bench-runner -generate`: 726 cases
+built from 300 real businesses (seed 42), through the full Search plus ExactName
+plus rank pipeline. Cases are bucketed by mode (exact name, typo, accent, partial
+name, over-fire) so a regression in one mode is visible, not averaged away.
+
+| Mode | Pass@3 | Notes |
+|---|---|---|
+| exact_name | **100%** | unique-name pins land |
+| typo | **97%** (254/261) | per-word Levenshtein budget |
+| accent | **100%** | diacritic-stripping tokenizer |
+| over_fire | **100%** (25/25) | after the hybrid pin fix (was 76%) |
+| partial | **68%** (91/134) | lifted from 37% by the prefix-pin fix |
+| **overall** | **93%** (674/726) | |
+
+Two fixes moved these numbers, each without regressing the others:
+
+<CardGroup cols={2}>
+  <Card title="Over-fire hybrid pin: 76% to 100%" icon="thumbtack">
+    The three-guard pin (coverage matcher, cardinality back-off, categorical
+    suppression) closed the false-pin gap with typo recall held at 97%. Detail in
+    [Decisions and judgment](/decisions#exact-name-pin-vs-category-over-fire).
+  </Card>
+  <Card title="Prefix-name pin: partial 37% to 68%" icon="magnifying-glass">
+    A `lemon_prefix_match` function (in-order, typo-tolerant prefix coverage) lets
+    the existing name pin fire on prefixes too, lifting overall 86% to 93% with no
+    regression elsewhere.
+  </Card>
+</CardGroup>
+
+<Note>
+The remaining partial misses are not a recall gap. They are large chains (Pep
+Boys, Presidente Supermarket) where the prefix maps to many equally-valid
+siblings and the bench samples one arbitrarily: ambiguous ground truth, not a
+miss.
+</Note>
+
+## Ranking-quality harness
+
+Findability tells you the right business is *reachable*. It does not tell you the
+order *feels right*. So a second, spec-derived harness (`cmd/bench-runner
+-quality`) runs a 25-query set (categories, intent, geo, vibe) through the real
+pipeline and scores the top-15 on the dimensions the spec actually cares about.
+"Correct" is grounded in the spec's signal intentions, not opinion.
+
+<CardGroup cols={2}>
+  <Card title="Locality" icon="location-dot">
+    Mean distance of the returned set. Lower is tighter.
+  </Card>
+  <Card title="Rating and category precision" icon="star">
+    Are results well-rated and actually in the queried category?
+  </Card>
+  <Card title="Intent adherence" icon="brain">
+    Does an intent query (price, open-now, vibe) return matching results?
+  </Card>
+  <Card title="Claimed-vs-base-rate and diversity" icon="scale-balanced">
+    Does the claimed signal over-dominate? new-at-rank-1 should be 0 per spec.
+  </Card>
+</CardGroup>
+
+The harness takes a `-config`, so it doubles as an A/B rig: every tuning decision
+was measured, not asserted. Two decisions it drove:
+
+### The claimed-weight sweep
+
+The harness caught the claimed signal dominating across archetypes, not just
+low-stakes, and the resulting sweep is the clearest judgment exhibit in the
+build. Aggregate `claimed_pct` over the 25-query set moved from **66% to 38%**
+(literal) and **55% to 34%** (decay), while category precision went **86% to 87%**
+and mean rating **0.916 to 0.919** (both slightly up, so no quality cost). The
+full before/after weight table and the Panther Coffee story are in
+[Decisions and judgment](/decisions#claimed-and-friends-synthesize-both-then-sweep-the-weight).
+`new-at-rank-1` is **0** in both arms (a new business never tops the list, per
+spec).
+
+### Literal versus decay distance
+
+The same harness measured the distance switch: decay cuts mean distance from
+**8.13 km to 6.12 km** (25% tighter locality) for only 0.6pp category precision
+and 0.8pp rating. We keep literal as the spec default and ship decay as a
+documented switch. The trade-off table is in
+[Decisions and judgment](/decisions#distance-literal-by-default-decay-measured-behind-a-switch).
+
+<Note>
+The harness is what turned ranking tuning from eyeballing single queries into a
+measured, repeatable process. It caught a real regression a single-query spot
+check had hidden (claimed dominating the medium and high-stakes archetypes, not
+just low-stakes).
+</Note>
+
+## The search-engine A/B
+
+Before committing to Postgres for search, we ran a shadow A/B: 726 cases
+generated from 300 real businesses, the identical set across engines, the same
+ranker and the same pin logic, with only the retrieval engine differing.
+
+| Dimension | Postgres trgm 0.85 | Postgres cov+leven | Meili (default) | Meili (tuned) |
+|---|---|---|---|---|
+| exact | 100% | 100% | 100% | 100% |
+| typo | 69% | **97%** | 77% | 92% |
+| accent | 67% | 100% | 83% | 100% |
+| over_fire | 88% | 76% | 100% | **92%** |
+| partial | 37% | 37% | 39% | **43%** |
+| **overall** | 76% | **86%** | 80% | **86%** |
+| search p95 (local) | ~105 ms | ~40 ms | ~11 ms | ~8 ms |
+
+A tuned Meilisearch ties the Postgres matcher overall, with a different profile:
+Meili wins partials and over-fire (ranking beats hard-pinning on bare category
+words) and raw latency; Postgres wins typo (its per-word Levenshtein budget
+exceeds Meili's 2-typo cap). Meili's *defaults* under-perform (80%, typo 77%), so
+the comparison is only fair after tuning. **We chose Postgres for single-system
+simplicity under a four-day budget, not superiority**, and keep Meili as a
+validated escape hatch behind the `BusinessRepo` port.
+
+<Note>
+Since this A/B, the prefix-name pin lifted the Postgres matcher to partial 68% /
+overall 93%, so it now leads the tuned-Meili baseline on this set. A real Meili
+deployment also adds an API-to-engine network hop that partially offsets its
+faster raw search. Full table and caveats:
+[ADR-0002](https://github.com/danielreales00/lemon-search/blob/main/docs/adr/0002-search-engine.md).
+</Note>
+
+## Speed: single query
+
+Single-query server-side latency is **p95 around 80ms, p50 around 50ms**, under
+the 100ms target. The stage split: embed is flat at ~6ms, **SQL is the dominant
+stage**, and re-rank is a couple of milliseconds (pure CPU over up to 150
+candidates). The methodology is an open-loop load bench (`api/cmd/loadbench`)
+against the deployed box from a same-region EC2 instance, with a corpus weighted
+for search-as-you-type. Open-loop (constant arrival rate, latency measured from
+intended send time) surfaces coordinated omission that a closed-loop harness
+would hide.
+
+### The short-query fix the load bench caught
+
+Spot-checks hid it, but the realistic mix showed single-query p95 at ~146ms,
+entirely from short lexical prefixes (`s` = 156ms, `c` = 147ms) while everything
+of 3 or more characters (`coffee` 73ms) and all semantic queries
+(`chill place to work` 23ms) were comfortable. The root cause: `pg_trgm`
+similarity is meaningless below 3 characters (a 1-char query matches 0 rows yet
+costs ~30ms to scan, and the ranker then computes `similarity()` for the ~1,700
+rows an `ilike 'c%'` recalls: pure waste).
+
+<Steps>
+  <Step title="A length gate (migration 0009)">
+    Skips the trigram recall arm and the `similarity()` rank term for queries
+    under 3 characters. Queries of 3 or more characters are byte-identical (bench
+    pass@3 held at 629/726 before and after); 2-char queries fell 121ms to 70ms.
+  </Step>
+  <Step title="A frontend min-length-2 gate">
+    The client does not fire until the second keystroke. We checked the data
+    first: the only 1-char "names" are `.` and `d`, both malformed records, so this
+    costs nothing real and is reversible.
+  </Step>
+</Steps>
+
+Together: single-query p95 **146ms to ~80ms**, under target.
+
+## Speed: under load
+
+With per-query cost fixed, the p95 climb under sustained concurrency is the
+Supabase **2-vCPU tier** throughput wall (Micro / Small / Medium / Large are all
+2 vCPU; CPU scales only at XL+). That is a separate compute-scaling lever, not a
+per-query problem. We attribute it cleanly because `loadbench` records the
+server's `sql` / `embed` split per request, and the knee sits exactly where the
+2-core math predicts (~80 rps). A live preview against the dev box:
+
+| Rate (rps) | Wall p95 | SQL | Embed | Status |
+|---|---|---|---|---|
+| 25 | 70 ms | 67 | 2 | ok |
+| 50 | 71 ms | 66 | 2 | ok |
+| 100 | 169 ms | 157 | 8 | knee |
+| 200 | 1837 ms | 1749 | 27 | DB saturates (503s) |
+
+`sql` is the wall at every step; `embed` never breaks a sweat. On a co-scaled
+Supabase the knee moves out proportionally to cores, and the *next* wall becomes
+the EC2 embed pool (~900 req/s on `c7i.xlarge`, validated near-linearly by the
+pool bench in
+[ADR-0007](https://github.com/danielreales00/lemon-search/blob/main/docs/adr/0007-api-host-ec2.md)).
+Honesty over a single big number: the per-query budget is met; sustained
+throughput is a known, named, single-lever scaling story (see
+[Known gaps and limitations](/known-gaps#open-gaps-in-priority-order)).
+
+## The semantic recall lift
+
+The dense-recall channel was also measured. On 24 hand-labeled natural-language
+and vibe queries it lifts pass@3 from **50% to 88%** (+38pp, 0 regressions on
+lexical queries). Query-embed is ~6ms and the HNSW probe is ~1ms. The embedding
+runtime choice was itself benchmarked three ways:
+
+| Runtime | Embed time | Verdict |
+|---|---|---|
+| Pure-Go interpreter (GoMLX) | ~67 ms | Fails the 100ms gate |
+| Ollama sidecar | ~15 ms | Clears, but needs a separate process |
+| In-process ONNX Runtime | ~1 to 2 ms | Chosen: fastest, single binary |
+
+Detail and the model choice: [Smart intent and semantic search](/intent-and-semantic#layer-two-semantic-recall-for-vibe-queries).
+
+For the harness plans and the raw bench artifacts, see
+[docs/bench/plan.md](https://github.com/danielreales00/lemon-search/blob/main/docs/bench/plan.md).

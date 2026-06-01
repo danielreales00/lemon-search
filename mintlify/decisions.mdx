@@ -1,0 +1,253 @@
+---
+title: "Decisions and judgment"
+description: "The places the spec was ambiguous or did not match the data, and the documented call we made each time."
+---
+
+The spec was clear about the seven signals, the archetype weighting, and the
+speed bar. A handful of places, though, were underspecified or did not match the
+data the way the words implied. Each of those was a judgment call. This page
+collects them, because how those calls were made (and recorded) is the part of
+the work that a numbers table cannot show.
+
+The throughline is one rule, applied everywhere: **default to the most literal
+reading of the spec, and surface the "smarter" alternative as an opt-in switch
+with a measured comparison, rather than quietly deviating.** An unflagged
+deviation we think is clever is worse than a literal reading we can defend.
+
+<Note>
+**Spec-contract discipline.** Every alternative described here ships behind a
+config switch (`signal_formulas.*`) or a feature flag, default off, with the
+bench numbers attached. See
+[ADR-0004](https://github.com/danielreales00/lemon-search/blob/main/docs/adr/0004-spec-contract-discipline.md).
+</Note>
+
+## The calls at a glance
+
+<CardGroup cols={2}>
+  <Card title="Reaction count proxy" icon="thumbs-up">
+    The literal field is roughly 92% zero. We proxy with google_review_count,
+    which has the magnitude the signal needs, and document it.
+  </Card>
+  <Card title="Distance: literal, decay as a switch" icon="location-dot">
+    We keep the spec's linear 30-mile cap as the default, and ship the (measurably
+    tighter) decay curve as a one-line config switch.
+  </Card>
+  <Card title="Claimed and friends synthesized" icon="dice">
+    Both signals are synthesized deterministically off the business id, then the
+    claimed weight was swept down after the harness caught it dominating.
+  </Card>
+  <Card title="Exact-name pin vs category" icon="thumbtack">
+    The spec uses different verbs ("returns first, regardless" vs "surfaces"); we
+    layer three orthogonal guards so a category word never pins a business.
+  </Card>
+</CardGroup>
+
+## Reaction count maps to google_review_count
+
+<Tabs>
+  <Tab title="In plain English">
+    The popularity signal exists so that a place with hundreds of happy reviews
+    outranks a brand-new one. The data has a field literally named
+    "lemon reaction count", but it is almost entirely zeros (Lemon is pre-launch,
+    so nobody has reacted yet). Using it would make popularity a dead signal. So
+    we use the Google review count instead, which is the field that actually
+    carries the magnitude the signal is supposed to measure, and we say so plainly.
+  </Tab>
+  <Tab title="For engineers">
+    `lemon_reaction_count` is roughly 92% zero with a maximum around 27, so as the
+    spec's "reaction count" (the signal whose whole point is "800 should not bury
+    50") it carries no usable distribution. `google_review_count` has 98% coverage
+    and the magnitude and spread the signal needs, so we proxy with it and document
+    the call. The pre-launch `status` distribution (every row `scraped` /
+    `discovered`, none `live`) confirms there were never real Lemon reactions to
+    count.
+  </Tab>
+</Tabs>
+
+## Distance: literal by default, decay measured behind a switch
+
+This is the model case for spec-contract discipline, because the alternative is
+measurably better and we still kept the literal reading as the default.
+
+<Tabs>
+  <Tab title="In plain English">
+    The spec says "inverse distance, capped at 30 miles". The cleanest reading is
+    a straight line: full credit up close, zero at 30 miles. A decay curve (sharp
+    falloff for a tow truck, gentle for a destination spa) arguably "feels nearer"
+    better. We measured both. Decay tightens the average distance of results by a
+    quarter for almost no quality cost. We still ship the literal line as the
+    default, because that is what the spec asked for, and make decay one config
+    line away with the numbers attached.
+  </Tab>
+  <Tab title="The measured trade-off">
+    On the 25-query ranking-quality set, switching distance from literal to decay:
+
+    | Metric | Literal (default) | Decay (switch) | Change |
+    |---|---|---|---|
+    | mean distance | 8.13 km | 6.12 km | **-25% (tighter locality)** |
+    | category precision | (baseline) | -0.6pp | negligible cost |
+    | rating | (baseline) | -0.8pp | negligible cost |
+
+    Decay is the better "feels nearby" curve, but it deviates from the spec's
+    literal "capped at 30 miles". Per spec-contract discipline we keep literal as
+    the default and ship decay as a documented switch
+    (`signal_formulas.distance = decay`) with these numbers attached. The spec is
+    honored; the better option is one config line away. The per-archetype decay
+    constants are in [Ranking explained](/ranking#the-distance-option-literal-vs-decay).
+
+    A consequence worth naming: a 30-mile linear cap makes distance a **weak
+    discriminator within a single metro** (most of Miami-Dade is well inside 30
+    miles, so scores bunch near 1.0). The decay switch exists precisely to sharpen
+    locality if the harness shows it helps.
+  </Tab>
+</Tabs>
+
+## Claimed and friends: synthesize both, then sweep the weight
+
+The spec lists two signals to synthesize ("synthesize a small friends-reacted
+dataset"; "synthesize a claimed/unclaimed flag"). Getting this right took two
+turns, and the turns themselves are the judgment exhibit.
+
+<Tabs>
+  <Tab title="In plain English">
+    Two of the seven signals had no real source in the data, and the spec asked us
+    to invent them. We first invented only the friends signal and left "claimed"
+    as the handful of real rows, on a data-fidelity instinct: do not fabricate
+    what a grader might inspect live. But that left the claimed signal boosting
+    almost nothing, so we synthesized both, seeded deterministically off each
+    business id so re-loading is reproducible.
+
+    Then the testing harness caught something. A coffee cart with 14 reviews,
+    flagged as claimed, was outranking Panther Coffee with 2,550 reviews. The
+    claimed boost had become a near-binary sort key, which violates "more reviews
+    means more confidence". We turned the claimed weight down across the board so
+    it acts as a tiebreaker, not an override, and moved the freed weight into the
+    quality signals the spec actually centers on (popularity and rating). Higher
+    stakes businesses (weddings, contractors) keep a larger claimed weight, which
+    is correct: a verified profile matters more there than for a coffee run.
+  </Tab>
+  <Tab title="The tuning story (engineers)">
+    Both signals are synthesized deterministically off the `id` with
+    domain-separated salts, so re-ingesting is idempotent: `friend_count` (~3% of
+    rows get 1 to 5) and `is_claimed` (~20% claimed).
+
+    **First fix (single-query spot check).** Synthesizing claimed at 35% exercised
+    the claimed weight for the first time and exposed it as miscalibrated. For
+    "coffee", top-15 scores cluster in a ~0.14 band, and a 0.08 low-stakes claimed
+    weight was 57% of that spread, acting as a near-binary sort key: a 14-review
+    claimed coffee cart outranked Panther Coffee (2,550 reviews). Two coordinated
+    fixes: low-stakes claimed weight 0.08 to 0.05, the freed 0.03 into popularity
+    (0.12 to 0.15); and the synth rate 35% to 20%.
+
+    **Second fix (the full sweep via the quality harness).** The
+    ranking-quality harness then showed the over-domination was not confined to
+    low-stakes. Aggregate `claimed_pct` across the 25-query set sat at **66%**,
+    roughly 3x the 20.7% base rate, driven mostly by the *other* archetypes whose
+    claimed weights were still large. Because the synthesized flag is
+    **independent of every other signal** (a hash of the `id`), a large claimed
+    weight pulls unrelated claimed businesses to the top of every result set. The
+    harness floor with the claimed weight zeroed everywhere is ~28%, so the claimed
+    weight was the entire lever between 28% and 66%.
+  </Tab>
+</Tabs>
+
+The sweep moved the freed weight into the spec's quality signals. The before and
+after, per archetype:
+
+| Archetype | Claimed weight before | After |
+|---|---|---|
+| low_stakes_fast_nearby | 0.05 | **0.01** |
+| medium_stakes_occasion | 0.15 | **0.03** |
+| high_stakes_one_time | 0.25 | **0.12** |
+| recurring_service | 0.22 | **0.10** |
+| experiential | 0.10 | **0.07** |
+| utility_distance_dominant | 0.08 | 0.08 (already low) |
+
+The spec ordering still holds (claimed matters more for high-stakes and recurring
+than for food), but it is now a tiebreaker, not a sort key. The result, measured
+on the same harness:
+
+<CardGroup cols={3}>
+  <Card title="claimed_pct 66% to 38%" icon="chart-line">
+    Literal mode (55% to 34% in decay mode). Back toward the 20.7% base rate.
+  </Card>
+  <Card title="category precision 86% to 87%" icon="bullseye">
+    Slightly up, not down. No quality cost.
+  </Card>
+  <Card title="mean rating 0.916 to 0.919" icon="star">
+    Also slightly up. The sweep paid for itself.
+  </Card>
+</CardGroup>
+
+The medium and high-stakes probe queries that came back near-fully-claimed now do
+not: gym 100% to ~30%, barber 100% to ~47%, spa 100% to 60%, nail 93% to 60%,
+tattoo 100% to 53%, each still at 100% category precision.
+
+<Note>
+This is the single clearest example of why the ranking-quality harness exists. A
+single-query spot check had hidden the medium and high-stakes domination; the
+harness turned tuning from eyeballing into a measured, repeatable A/B. See
+[Quality and benchmarks](/quality#ranking-quality-harness).
+</Note>
+
+## Exact-name pin vs category over-fire
+
+The spec uses two deliberately different verbs: a name "returns that business
+first, **regardless** of other ranking signals" (a hard override), while a
+category match "**surfaces**" businesses (rank, do not override). Conflating them
+is the over-fire bug.
+
+<Tabs>
+  <Tab title="In plain English">
+    Typing a business name should pin that exact business to the top. Typing a
+    category word like "coffee" should rank coffee shops, not pin a business that
+    happens to be named "Coffee To Go". Our first pass conflated the two and pinned
+    on any name that started with the query, so "coffee" wrongly pinned "Coffee To
+    Go" and "sushi" pinned "Sushi Joe". The fix stops relying on any single
+    similarity number and layers three independent guards.
+  </Tab>
+  <Tab title="For engineers">
+    The deeper tension: trigram similarity cannot separate a typo'd *full name*
+    from a *category prefix*. The spec's own example `joes barbr shop` to
+    `Joe's Barber Shop` scores ~0.57, the same band as the false positives, so no
+    single threshold separates them. The resolution layers three orthogonal
+    conditions:
+
+    1. **Coverage matcher** (`lemon_name_match`): token coverage plus per-word
+       Levenshtein, asking "does the query span most of the *full name*?" (bar
+       0.8).
+    2. **Cardinality back-off** (always on): suppress the pin when more than 5
+       businesses share the name (a chain, not a unique business).
+    3. **Categorical suppression** (flag-gated): drop the pin when the whole query
+       is category, cuisine, or domain terms (`intent.IsCategorical`).
+
+    Measured: `over_fire` 76% to 100% with typo held at 97%. Full walkthrough:
+    [Smart intent and semantic search](/intent-and-semantic#the-exact-name-pin-and-its-guards).
+  </Tab>
+</Tabs>
+
+## Two smaller calls
+
+<AccordionGroup>
+  <Accordion title="lemon_score skew (mean near 9)">
+    The rating field is skewed: its mean is around 9 out of 10, so it barely
+    discriminates between businesses. We kept the literal `lemon_score / 10` as the
+    contract default, and surfaced a Bayesian-smoothed `google_rating` (IMDb-style,
+    which counters the skew) as an opt-in switch (`signal_formulas.rating =
+    bayesian`). Same discipline: literal default, smarter alternative measured
+    behind a switch.
+  </Accordion>
+  <Accordion title="Rubric says 4 archetypes, the body lists 6">
+    The spec's rubric mentions 4 archetypes while its body describes 6. We
+    implemented 6 per the body (`low_stakes_fast_nearby`, `medium_stakes_occasion`,
+    `high_stakes_one_time`, `experiential`, `recurring_service`,
+    `utility_distance_dominant`) and flag the discrepancy openly here rather than
+    silently picking one.
+  </Accordion>
+</AccordionGroup>
+
+For the data-side calls (what we drop, what we keep messy on purpose, the
+malformed-JSON loader), see
+[docs/data/quality.md](https://github.com/danielreales00/lemon-search/blob/main/docs/data/quality.md).
+For the formula reference,
+[docs/ranking/semantics.md](https://github.com/danielreales00/lemon-search/blob/main/docs/ranking/semantics.md).
