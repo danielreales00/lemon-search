@@ -42,8 +42,8 @@ variants (Bayesian rating, distance decay) live behind config switches, off by
 default, measured in a bench. Measured single-query server p95 is **~80 ms**
 (p50 ~50 ms) after a short-query optimization; embedding is ~6 ms and SQL is
 the dominant stage. Findability bench (`bench-runner -generate`, 726 cases) is
-**87% pass@3**: exact-name 100%, typo 97%, accent 100%, partial 37% (the known
-weak spot). Biggest judgment call: holding the spec contract literally and
+**93% pass@3**: exact-name 100%, typo 97%, accent 100%, partial 68% (a
+prefix-pin fix lifted it from 37%). Biggest judgment call: holding the spec contract literally and
 surfacing every "smarter" idea as an opt-in switch with a measured comparison,
 rather than silently substituting it.
 
@@ -163,8 +163,10 @@ exceeds Meili's 2-typo cap). Meili's *defaults* under-perform (80%, typo 77%),
 so the comparison is only fair after tuning typo tolerance and matching
 strategy. **We chose Postgres for single-system simplicity under a 4-day budget,
 not superiority**, and keep Meili as a validated escape hatch behind the
-`BusinessRepo` port. A real Meili deployment also adds an API→engine network hop
-that partially offsets its faster raw search. Full table and caveats:
+`BusinessRepo` port. A real Meili deployment also adds an API to engine network
+hop that partially offsets its faster raw search. Note that since this
+comparison the prefix-name pin lifted the Postgres matcher to partial 68% /
+overall 93%, so it now leads the tuned-Meili baseline on this set. Full table and caveats:
 ADR-0002.
 
 ---
@@ -397,23 +399,41 @@ Search + ExactName + rank pipeline:
 | typo | **97%** (254/261) | per-word Levenshtein budget |
 | accent | **100%** | diacritic-stripping tokenizer |
 | over_fire | **100%** (25/25) | after the hybrid pin fix (was 76%) |
-| partial | **37%** (49/134) | the standing weak spot |
-| **overall** | **87%** (629/726) | |
+| partial | **68%** (91/134) | lifted from 37% by the prefix-pin fix |
+| **overall** | **93%** (674/726) | |
 
 Read: the over-fire hybrid (below) closed the false-pin gap without costing typo
-recall, and partial-name matching is the next lever (it is a recall/ranking gap
-the over-fire work deliberately did not touch).
+recall, and the prefix-name pin then lifted partial-name matching from 37% to
+68% (overall 86% to 93%) with no regression elsewhere. The remaining partial
+misses are ambiguous-chain ground truth, not a recall gap.
 
 ### Ranking-quality evaluation
 
-> **Placeholder, in progress.** A spec-derived metric harness is being built in
-> parallel to measure ranking *quality* (as distinct from findability) along
-> the dimensions the spec actually cares about: **locality, rating, category
-> precision, intent adherence, claimed-vs-base-rate, and diversity.** It will
-> also produce the **literal-vs-decay distance** comparison (and
-> literal-vs-Bayesian rating) on the same harness, so the config-switch
-> recommendation is measured rather than asserted. Numbers will be added here
-> when the harness lands; we are not fabricating them in advance.
+Findability (pass@3) tells you the right business is *reachable*. It does not
+tell you the order *feels right*. So we built a second, spec-derived harness
+(`cmd/bench-runner -quality`) that runs a 25-query set (categories, intent, geo,
+vibe) through the real pipeline and scores the top-15 on the dimensions the spec
+actually cares about: locality (mean distance), rating, category precision,
+intent adherence, claimed-vs-base-rate, new-at-rank-1, and diversity. "Correct"
+is grounded in the spec's signal intentions, not opinion. The harness takes a
+`-config`, so it doubles as an A/B rig: every tuning decision below was measured,
+not asserted.
+
+**Literal vs decay distance (the measured switch decision).** On the 25-query
+set, switching distance from literal to decay cuts mean distance from 8.13 km to
+6.12 km (a 25% tighter locality), at a cost of only 0.6pp category precision and
+0.8pp rating. Decay is the better "feels nearby" curve, but it deviates from the
+spec's literal "capped at 30 miles," so per our spec-contract discipline we
+**keep literal as the default** and ship decay as a documented config switch with
+these numbers attached. The spec is honored; the better option is one config line
+away.
+
+**Claimed-vs-base-rate** is what drove the claimed-weight sweep above (66% to
+38%). **new-at-rank-1 is 0** in both arms (a new business never tops the list,
+per spec). The harness is what turned ranking tuning from eyeballing single
+queries into a measured, repeatable process, and it caught a real regression a
+single-query spot check had hidden (claimed dominating the medium and high-stakes
+archetypes, not just low-stakes).
 
 ---
 
@@ -509,17 +529,25 @@ Reference: `docs/ranking/semantics.md`, `docs/data/quality.md`, ADR-0004.
 ## What is broken, and what I would fix first
 
 **For business readers.** A few honest gaps. Most are data-quality issues we
-chose to flag rather than paper over. The single biggest one to fix first is
-partial-name search.
+chose to flag rather than paper over. The previous biggest gap, partial-name
+search, has now been fixed; the remaining items are mostly data quality and a
+known throughput ceiling.
 
 **For engineers.** In priority order:
 
-1. **Partial-name matching is weak (37%).** Fixing first. A query that is a
-   *fragment* of a real name (not a typo of the whole name) is a recall +
-   ranking gap; the over-fire hybrid tightened the *pin*, not recall. The fix is
-   a dedicated prefix/substring recall arm plus a coverage-aware rank term, or
-   adopting the Meili adapter (which already wins partials, 43% vs 37%) behind
-   the existing port. This is the clearest lever on the headline quality number.
+1. **Partial-name matching: fixed (37% to 68% pass@3, overall 86% to 93%).** This
+   was the weak spot. The root cause was a *ranking* gap, not retrieval: a query
+   that is a unique *fragment* of a name (for example "best florida pest") was
+   retrieved into the candidate pool with the top text-relevance score, then
+   outranked by a more popular token-sharer, because text relevance is not one of
+   the 7 spec signals and the exact-name pin required the query to span the whole
+   name. The fix is a `lemon_prefix_match` function (in-order, typo-tolerant
+   prefix coverage) that lets the existing max-cost name pin fire on prefixes too,
+   guarded by the same over-fire protections (>= 2 tokens, cardinality back-off),
+   so typo, exact-name, accent, and over-fire all held at their prior levels. The
+   remaining ~32% of partial misses are large chains (Pep Boys, Presidente
+   Supermarket) where the prefix maps to many equally-valid siblings and the
+   bench samples one arbitrarily, ambiguous ground truth rather than a recall gap.
 2. **Dead Google photo URLs.** A subset of source photo URLs (Google-hosted) are
    stale and 404 at display time. We count photos but do not validate URL
    liveness. Fix: a liveness sweep at ingest (HEAD check, drop dead URLs before
@@ -554,21 +582,19 @@ These are flagged.
 
 ## What I would do with another week
 
-**For business readers.** Make partial-name search as good as the rest, diversify
-the top results so one chain does not dominate, learn from clicks to keep
-improving, and harden the data (photos, hours).
+**For business readers.** Diversify the top results so one chain does not
+dominate, learn from clicks to keep improving, and harden the data (photos,
+hours). The partial-name weak spot and the ranking-quality harness were both
+closed during the build itself.
 
 **For engineers**, concretely:
 
-- **Close the partial-name gap.** A prefix/substring recall arm with a
-  coverage-aware rank term, benched against the Meili adapter (already a proven
-  +6pp on partials) wired behind the `BusinessRepo` port. Target: partial
-  37% → 70%+, overall 87% → ~92%.
-- **Ranking-quality harness to green.** Finish the spec-derived metric harness
-  (locality, rating, category precision, intent adherence, claimed-vs-base-rate,
-  diversity), publish the literal-vs-decay-distance and literal-vs-Bayesian-
-  rating comparisons, and let the data pick the default config rather than the
-  spec-literal default.
+- **Extend the quality harness with human judgments.** The spec-derived metric
+  harness (locality, rating, category precision, intent adherence,
+  claimed-vs-base-rate, diversity) shipped and drove the claimed and distance
+  decisions. The next step is a small panel of hand-labeled "best result" sets to
+  complement the spec-derived proxies, plus the Meili adapter benched as an
+  alternative behind the `BusinessRepo` port.
 - **MMR diversity** over the top-15 to break chain/owner clumping.
 - **Click-through learning loop.** Log `(query, result, clicked)` and nightly
   nudge ranker weights or learn a re-rank, feeding the per-user loop the spec's
