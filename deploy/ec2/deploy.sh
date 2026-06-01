@@ -11,6 +11,9 @@ REPO_REF="${REPO_REF:-main}"
 GOBIN=/usr/local/go/bin/go
 
 echo "==> fetch ${REPO_REF}"
+# This script runs as root but the repo tree is owned by the lemon service user,
+# which git rejects as "dubious ownership" — whitelist it (idempotent).
+git config --global --add safe.directory "$REPO_DIR" 2>/dev/null || true
 git -C "$REPO_DIR" fetch --depth 1 origin "$REPO_REF"
 git -C "$REPO_DIR" checkout -f FETCH_HEAD
 

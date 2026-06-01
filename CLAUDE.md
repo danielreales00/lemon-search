@@ -284,7 +284,10 @@ lefthook run pre-push --all-files
   the contract; Bayesian alternative behind a switch.
 - **Hours are 81% populated.** Missing-hours → soft-open (signal 0.7), never
   hard-filtered.
-- **No `reaction_count` column.** We use `google_review_count` as the proxy.
+- **Reaction count: `lemon_reaction_count` exists but is ~92% zero (max ~27),**
+  too sparse for the spec's log-scaled confidence signal, so we proxy with
+  `google_review_count` (richer, matches the spec's "800 vs 50" magnitude).
+  Documented as a deliberate data-quality call, not an oversight.
 - **12 open Dependabot PRs** (some major: TypeScript 6, unicorn 64, boundaries
   6). Triage before merging — major bumps may need config updates. Don't
   blanket-merge.
