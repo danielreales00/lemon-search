@@ -99,6 +99,9 @@ type opts struct {
 	semantic      bool
 	semanticBench string
 	semanticOut   string
+	quality       bool
+	qualityBench  string
+	qualityOut    string
 }
 
 // Ranking-formula modes selected by -formula. "all" sweeps the three below over
@@ -143,6 +146,9 @@ func main() {
 	flag.BoolVar(&o.semantic, "semantic", false, "run the semantic go/no-go bench (LEMON_FF_SEMANTIC on vs off) and exit")
 	flag.StringVar(&o.semanticBench, "semantic-bench", "../bench/semantic-cluster.json", "hand-labeled NL query set for -semantic")
 	flag.StringVar(&o.semanticOut, "semantic-out", "../bench/semantic-results-2026-05-29.md", "markdown path for the -semantic report")
+	flag.BoolVar(&o.quality, "quality", false, "run the ranking-quality eval (literal vs decay) and exit")
+	flag.StringVar(&o.qualityBench, "quality-bench", "../bench/quality-queries.json", "curated ranking-quality query set for -quality")
+	flag.StringVar(&o.qualityOut, "quality-out", "../bench/quality-results-2026-05-31.md", "markdown path for the -quality report")
 	flag.Parse()
 
 	if err := run(o); err != nil {
@@ -185,6 +191,12 @@ func run(o opts) error {
 	// retrieval comparison, so it dispatches before the name-matching set is built.
 	if o.semantic {
 		return runSemantic(ctx, cfg, repo, o)
+	}
+
+	// The quality eval has its own curated set, per-query metrics, and the
+	// literal-vs-decay A/B, so it dispatches before the name-matching set is built.
+	if o.quality {
+		return runQuality(ctx, cfg, repo, o)
 	}
 
 	bf, err := buildBench(ctx, pool, o)

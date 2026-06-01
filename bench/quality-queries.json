@@ -1,0 +1,36 @@
+{
+  "$schema_note": "Ranking-QUALITY eval set. Unlike bench/queries.json (findability/pass@3), each query here is scored by SPEC-DERIVED metrics over the top-15: locality, result quality, open-status, category_precision, intent_adherence, claimed-vs-base-rate, new@rank1, diversity. 'category_match' is a list of lowercase substrings tested against each result's subcategory+category (the data's taxonomy); a result is 'in-category' if any matches. 'expected_archetype' is the demand-shape bucket the spec assigns the query's businesses; 'intent' tags the spec intention the query expresses so per-intent adherence can be measured. 'golden_top5' lists hand-picked anchors that SHOULD appear in the top-5 (precision@5), grounded in the local data (highest-reviewed, well-rated places for that category near the user point). Keep golden small and honest.",
+  "user_location": { "lat": 25.7741728, "lng": -80.1937, "label": "Downtown Miami" },
+  "now_override": "2026-05-29T13:00:00-04:00",
+  "claimed_base_rate_pct": 20.7,
+  "queries": [
+    { "kind": "category", "q": "sushi", "category_match": ["japanese", "sushi"], "expected_archetype": "low_stakes_fast_nearby", "golden_top5": ["Sokai Sushi Bar"] },
+    { "kind": "category", "q": "coffee", "category_match": ["café", "cafe", "coffee"], "expected_archetype": "low_stakes_fast_nearby", "golden_top5": ["Panther Coffee - Wynwood"] },
+    { "kind": "category", "q": "gym", "category_match": ["gym", "fitness", "personal training"], "expected_archetype": "medium_stakes_occasion", "golden_top5": [] },
+    { "kind": "category", "q": "barber", "category_match": ["barber"], "expected_archetype": "medium_stakes_occasion", "golden_top5": [] },
+    { "kind": "category", "q": "nail salon", "category_match": ["nail"], "expected_archetype": "medium_stakes_occasion", "golden_top5": [] },
+    { "kind": "category", "q": "tacos", "category_match": ["mexican", "taco"], "expected_archetype": "low_stakes_fast_nearby", "golden_top5": [] },
+    { "kind": "category", "q": "pizza", "category_match": ["pizz"], "expected_archetype": "low_stakes_fast_nearby", "golden_top5": [] },
+    { "kind": "category", "q": "spa", "category_match": ["spa"], "expected_archetype": "medium_stakes_occasion", "golden_top5": [] },
+    { "kind": "category", "q": "tattoo", "category_match": ["tattoo"], "expected_archetype": "medium_stakes_occasion", "golden_top5": [] },
+    { "kind": "category", "q": "ramen", "category_match": ["ramen", "japanese"], "expected_archetype": "low_stakes_fast_nearby", "golden_top5": [] },
+    { "kind": "category", "q": "steakhouse", "category_match": ["steak"], "expected_archetype": "medium_stakes_occasion", "golden_top5": [] },
+
+    { "kind": "intent", "q": "cheap restaurants", "category_match": ["restaurant", "mexican", "cuban", "café", "cafe", "pizz", "bakery", "seafood", "italian", "japanese", "food truck", "latin"], "expected_archetype": "low_stakes_fast_nearby", "intent": "cheap", "golden_top5": [] },
+    { "kind": "intent", "q": "open now", "category_match": [], "expected_archetype": "low_stakes_fast_nearby", "intent": "open_now", "golden_top5": [] },
+    { "kind": "intent", "q": "fancy dinner", "category_match": ["steak", "restaurant", "seafood", "italian", "japanese", "french", "latin", "american"], "expected_archetype": "medium_stakes_occasion", "intent": "fancy", "golden_top5": [] },
+    { "kind": "intent", "q": "date night", "category_match": ["restaurant", "bar", "steak", "italian", "seafood", "wine", "japanese", "latin"], "expected_archetype": "medium_stakes_occasion", "intent": "date_night", "golden_top5": [] },
+    { "kind": "intent", "q": "i'm hungry", "category_match": ["restaurant", "mexican", "cuban", "café", "cafe", "pizz", "bakery", "seafood", "italian", "japanese", "food truck", "latin", "bar", "burger"], "expected_archetype": "low_stakes_fast_nearby", "intent": "hungry", "golden_top5": [] },
+    { "kind": "intent", "q": "outdoor seating", "category_match": ["restaurant", "bar", "café", "cafe"], "expected_archetype": "low_stakes_fast_nearby", "intent": "outdoor", "golden_top5": [] },
+
+    { "kind": "vibe", "q": "chill place to work", "category_match": ["café", "cafe", "coffee", "coworking", "office"], "expected_archetype": "low_stakes_fast_nearby", "intent": "work", "golden_top5": [] },
+    { "kind": "vibe", "q": "somewhere to get pampered", "category_match": ["spa", "nail", "salon", "massage", "beauty"], "expected_archetype": "medium_stakes_occasion", "intent": "pamper", "golden_top5": [] },
+
+    { "kind": "geo", "q": "coffee", "category_match": ["café", "cafe", "coffee"], "expected_archetype": "low_stakes_fast_nearby", "user_location_override": { "lat": 25.7617, "lng": -80.1918, "label": "Brickell" }, "golden_top5": [] },
+    { "kind": "geo", "q": "coffee", "category_match": ["café", "cafe", "coffee"], "expected_archetype": "low_stakes_fast_nearby", "user_location_override": { "lat": 25.8000, "lng": -80.1300, "label": "Miami Beach" }, "golden_top5": [] },
+    { "kind": "geo", "q": "coffee", "category_match": ["café", "cafe", "coffee"], "expected_archetype": "low_stakes_fast_nearby", "user_location_override": { "lat": 25.8576, "lng": -80.2781, "label": "Hialeah" }, "golden_top5": [] },
+    { "kind": "geo", "q": "sushi", "category_match": ["japanese", "sushi"], "expected_archetype": "low_stakes_fast_nearby", "user_location_override": { "lat": 25.7617, "lng": -80.1918, "label": "Brickell" }, "golden_top5": [] },
+    { "kind": "geo", "q": "sushi", "category_match": ["japanese", "sushi"], "expected_archetype": "low_stakes_fast_nearby", "user_location_override": { "lat": 25.8000, "lng": -80.1300, "label": "Miami Beach" }, "golden_top5": [] },
+    { "kind": "geo", "q": "sushi", "category_match": ["japanese", "sushi"], "expected_archetype": "low_stakes_fast_nearby", "user_location_override": { "lat": 25.8576, "lng": -80.2781, "label": "Hialeah" }, "golden_top5": [] }
+  ]
+}
