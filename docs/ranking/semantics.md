@@ -251,6 +251,47 @@ kicks in.
 The `0.8` coverage bar is `nameMatchCoverage` in
 `api/internal/retrieve/postgres/repo.go`.
 
+### Partial-name (prefix) pin
+
+`lemon_name_match` requires the query to *span* the whole name, so a strict
+**prefix** ("best florida pest" → "Best Florida Pest Control") scores 0 and never
+pins. But text relevance is not a ranking signal - the 7-signal sum ignores how
+well a candidate's name matches the query - so a prefix that uniquely names a
+business was losing the top-3 to a more popular/closer unrelated token-sharer.
+This was the weakest findability mode (partial pass@3 ≈ 33%).
+
+`lemon_prefix_match(q, nm)` closes that gap: it returns name coverage in (0,1]
+when `q` is an **in-order, typo-tolerant prefix** of `nm` - every query token
+matches the name token at the *same position* within per-word Levenshtein
+tolerance - and 0 otherwise. The exact-name query pins a row when *either*
+matcher clears its bar:
+
+```sql
+WHERE (name % $q OR name ILIKE $q || '%')
+  AND (lemon_name_match($q, name) >= 0.8 OR lemon_prefix_match($q, name) >= 0.5)
+ORDER BY greatest(lemon_name_match($q, name), lemon_prefix_match($q, name)) DESC, id
+```
+
+The prefix path is precision-guarded the same way as the full-name path:
+
+- **≥ 2 query tokens** - a single token is a category word, not a name fragment,
+  so a bare "coffee"/"sushi" can never reach the prefix matcher (over_fire stays
+  100%).
+- **In-order, same-position** matching - "florida pest" does not match
+  "South Florida Pet Sitter"; only a genuine leading prefix counts.
+- **Cardinality back-off** (`maxNameMatches = 5`) and **categorical
+  suppression** (`LEMON_FF_INTENT`) apply unchanged, so a chain prefix shared by
+  many locations does not pin an arbitrary sibling.
+
+The `0.5` prefix bar is `prefixMatchCoverage` in
+`api/internal/retrieve/postgres/repo.go`. Measured effect: partial pass@3
+**33% → 68%** with exact-name/typo/accent/over_fire all held (100/97/100/100).
+The remaining partial "misses" are almost entirely large chains whose prefix
+maps to many equally-valid siblings (the bench samples one arbitrarily) - the
+engine returns a correct sibling; the ground truth is ambiguous, not absent.
+The spec contract is untouched: ranking is still the 7-signal linear sum; this
+only widens the max-cost name pin to recognize a confident prefix.
+
 ### The hybrid: coverage matcher + two back-offs (Stage 3)
 
 The Stage-2 version pinned on trigram `similarity ≥ 0.85`. Trigram alone cannot

@@ -1,6 +1,6 @@
 //go:build integration
 
-// These tests run against a LIVE Postgres with migrations 0001 + 0002 + 0003 applied.
+// These tests run against a LIVE Postgres with all migrations applied (make db-reset).
 // They are hermetic: they seed their own ZZFIXTURE rows, assert, and delete
 // them — they do NOT depend on any ingested data. Gated behind the
 // `integration` build tag so the default `go test ./...` needs no database.
@@ -187,6 +187,30 @@ func TestExactNameBarePrefixDoesNotPin(t *testing.T) {
 	}
 	if found {
 		t.Errorf("bare prefix %q pinned a result; the over-fire should be fixed", "ZZFIXTURE")
+	}
+}
+
+// TestExactNamePrefixPins guards the partial-name path: a multi-token, in-order
+// PREFIX of a unique name ("ZZFIXTURE Sushi", spanning "ZZFIXTURE Sushi Near")
+// must pin via lemon_prefix_match even though it does not span the whole name
+// (so lemon_name_match returns 0). "ZZFIXTURE Sushi" matches two seeded rows
+// (Near + Far), which is under maxNameMatches, so the higher-coverage one pins.
+func TestExactNamePrefixPins(t *testing.T) {
+	pool, ctx := setup(t)
+
+	repo, err := New(pool)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	c, found, err := repo.ExactName(ctx, "ZZFIXTURE Sushi")
+	if err != nil {
+		t.Fatalf("ExactName: %v", err)
+	}
+	if !found {
+		t.Fatalf("prefix %q did not pin; the partial-name path should fire", "ZZFIXTURE Sushi")
+	}
+	if !strings.HasPrefix(c.Name, "ZZFIXTURE Sushi") {
+		t.Errorf("prefix pin returned %q, want a ZZFIXTURE Sushi row", c.Name)
 	}
 }
 
