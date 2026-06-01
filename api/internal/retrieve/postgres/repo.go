@@ -25,6 +25,16 @@ const queryTO = time.Second
 // docs/ranking/semantics.md §"Exact-name pin".
 const nameMatchCoverage = 0.8
 
+// prefixMatchCoverage is the minimum prefix coverage (from lemon_prefix_match)
+// at/above which a partial-name query (a typo-tolerant, in-order PREFIX of a
+// name, >= 2 tokens) counts as a pin. Text relevance is not a ranking signal,
+// so without this a prefix that uniquely names a business loses the top-3 to a
+// more popular/closer unrelated token-sharer. 0.5 demands the prefix span at
+// least half the name; with the >= 2-token floor and the cardinality +
+// categorical back-offs, bare category words never reach it. See
+// docs/ranking/semantics.md §"Exact-name pin".
+const prefixMatchCoverage = 0.5
+
 // maxNameMatches caps how many businesses may share a name before the
 // exact-name pin backs off. A name matched by more than this many rows (e.g.
 // "7-Eleven", shared by 25+ locations) is not a unique business name, so pinning
@@ -51,12 +61,15 @@ const searchSQL = `
 	from search_candidates($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::vector)`
 
 // exactNameSQL is the separate exact-name path: 0–1 rows. A trigram GIN
-// pre-filter (name % $1) narrows candidates cheaply, then lemon_name_match
-// scores token coverage + per-word edit distance and pins only when the query
-// spans the name — so typo'd full names pin while category prefixes don't. See
-// docs/ranking/semantics.md §"Exact-name pin". It carries no user location
-// (the pin ignores distance), so distance_km is the ∞ sentinel and open-status
-// uses wall-clock now() for display only.
+// pre-filter (name % $1, plus an ilike prefix arm) narrows candidates cheaply,
+// then a row pins if EITHER it is a full-name match (lemon_name_match spans the
+// name — typo'd full names pin, category prefixes don't) OR a confident
+// in-order PREFIX (lemon_prefix_match: a multi-token name fragment like
+// "best florida pest" -> "Best Florida Pest Control"). The pin ranks on the
+// better of the two coverage scores. It carries no user location (the pin
+// ignores distance), so distance_km is the ∞ sentinel and open-status uses
+// wall-clock now() for display only. See docs/ranking/semantics.md §"Exact-name
+// pin".
 //
 // match_count is count(*) over () — the number of businesses matching the same
 // predicate, computed before LIMIT — so ExactName can back off when a name is
@@ -77,8 +90,9 @@ const exactNameSQL = `
 	from businesses b
 	cross join lateral lemon_open_status(
 		b.hours, (now() at time zone 'America/New_York')::timestamp) os
-	where b.name % $1 and lemon_name_match($1, b.name) >= $2
-	order by lemon_name_match($1, b.name) desc, b.id
+	where (b.name % $1 or b.name ilike $1 || '%')
+		and (lemon_name_match($1, b.name) >= $2 or lemon_prefix_match($1, b.name) >= $3)
+	order by greatest(lemon_name_match($1, b.name), lemon_prefix_match($1, b.name)) desc, b.id
 	limit 1`
 
 // Repo is the Supabase Postgres adapter implementing domain.BusinessRepo. It
@@ -141,16 +155,17 @@ func (r *Repo) Search(ctx context.Context, q string, opts domain.SearchOpts) ([]
 	return out, nil
 }
 
-// ExactName returns at most one candidate whose name matches q with token
-// coverage at or above nameMatchCoverage (per-word typo-tolerant). found=false
-// (with a nil error) means no pin — not an error. When the name is shared by
-// more than maxNameMatches businesses it is ambiguous (not a unique name), so
-// the pin backs off too.
+// ExactName returns at most one candidate whose name matches q — either a
+// full-name match (token coverage >= nameMatchCoverage, per-word typo-tolerant)
+// or a confident in-order PREFIX (lemon_prefix_match >= prefixMatchCoverage, for
+// partial-name fragments). found=false (with a nil error) means no pin — not an
+// error. When the name is shared by more than maxNameMatches businesses it is
+// ambiguous (not a unique name), so the pin backs off too.
 func (r *Repo) ExactName(ctx context.Context, q string) (c domain.Candidate, found bool, err error) {
 	ctx, cancel := context.WithTimeout(ctx, queryTO)
 	defer cancel()
 
-	rows, err := r.pool.Query(ctx, exactNameSQL, q, nameMatchCoverage)
+	rows, err := r.pool.Query(ctx, exactNameSQL, q, nameMatchCoverage, prefixMatchCoverage)
 	if err != nil {
 		return domain.Candidate{}, false, fmt.Errorf("exact-name query: %w", err)
 	}
