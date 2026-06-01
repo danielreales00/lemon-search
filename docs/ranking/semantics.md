@@ -158,9 +158,16 @@ Where `FRIENDS_FULL_CREDIT = 5` from config.
 signal_claimed(c) = 1.0 if c.is_claimed else 0.0
 ```
 
-Pure step. The "big boost" lives entirely in the archetype weight
-(`weights.claimed` is ≥ 0.20 for `high_stakes_one_time` and
-`recurring_service` archetypes).
+Pure step. The "big boost" lives entirely in the archetype weight, ordered by
+how much trust matters per demand-shape: `high_stakes_one_time` (0.12) >
+`recurring_service` (0.10) > `medium_stakes_occasion` (0.03) >
+`low_stakes_fast_nearby` (0.01). Weights are kept small on purpose — claimed is
+a tiebreaker, not a dominator. Because the synthesized flag is independent of
+every other signal (a hash of the id, ~20.7% base rate), a large weight pulls
+unrelated claimed businesses to the top of every result set; the
+ranking-quality harness (`cmd/bench-runner -quality`) measured `claimed_pct`
+falling from ~66% to ~38% (literal) once the weights were trimmed, with no loss
+of category precision or mean rating.
 
 ### 6. Photos - `signal_photos`
 
@@ -350,13 +357,13 @@ Weights for `low_stakes_fast_nearby`:
 ```
 distance: 0.25  · 0.969 = 0.2422
 rating:   0.18  · 0.920 = 0.1656
-popular:  0.15  · 0.656 = 0.0984
+popular:  0.19  · 0.656 = 0.1247
 friends:  0.12  · 0.400 = 0.0480
-claimed:  0.05  · 1.000 = 0.0500
+claimed:  0.01  · 1.000 = 0.0100
 photos:   0.10  · 1.000 = 0.1000
 open:     0.15  · 1.000 = 0.1500
                           ──────
-score                    ≈ 0.8542
+score                    ≈ 0.8405
 ```
 
 Compare to a similar sushi restaurant 4 km away with `google_review_count = 50`
@@ -369,11 +376,11 @@ friends       = 0
 … others equal …
 
 distance: 0.25 · 0.917 = 0.2293
-popular:  0.15 · 0.426 = 0.0639
+popular:  0.19 · 0.427 = 0.0811
 friends:  0
 … others same …
 
-score ≈ 0.7588
+score ≈ 0.7360
 ```
 
 First candidate wins by ~0.10 - distance dominates within the
