@@ -1,0 +1,139 @@
+---
+title: "Known gaps and limitations"
+description: "The honest what-is-broken list, in priority order, each with its mitigation."
+---
+
+The spec is explicit: an unflagged bug we find ourselves is worse than one we
+flag. So this page is the honest inventory of what is not finished or not perfect
+in the running system, in roughly the order we would fix it. Most are data-quality
+issues we chose to flag rather than paper over, plus one named scaling ceiling.
+Each item below pairs the gap with the mitigation in place today and the real
+fix.
+
+<Note>
+This is the current-state limitations list. For the forward-looking roadmap and
+the next features we would build, see [Future improvements](/future). The two
+overlap deliberately: a gap here is a lever there.
+</Note>
+
+## Partial-name matching: fixed
+
+The previous biggest gap is now closed, so it leads the list as a resolved item
+rather than an open one.
+
+<Tabs>
+  <Tab title="What happened">
+    Matching a unique *fragment* of a name (for example "best florida pest") was
+    the standing weak spot, measured at 37% pass@3. The root cause was a *ranking*
+    gap, not retrieval: the fragment was retrieved into the candidate pool with the
+    top text-relevance score, then outranked by a more popular token-sharer,
+    because text relevance is not one of the 7 spec signals and the exact-name pin
+    required the query to span the whole name.
+  </Tab>
+  <Tab title="The fix">
+    A `lemon_prefix_match` function (in-order, typo-tolerant prefix coverage) lets
+    the existing max-cost name pin fire on prefixes too, guarded by the same
+    over-fire protections (2 or more tokens, cardinality back-off), so typo,
+    exact-name, accent, and over-fire all held at their prior levels. Measured:
+    partial **37% to 68%**, overall **86% to 93%**. The remaining ~32% of partial
+    misses are large chains (Pep Boys, Presidente Supermarket) where the prefix
+    maps to many equally-valid siblings and the bench samples one arbitrarily:
+    ambiguous ground truth, not a recall gap.
+  </Tab>
+</Tabs>
+
+## Open gaps, in priority order
+
+<AccordionGroup>
+  <Accordion title="1. Dead Google photo URLs">
+    **Gap**: a subset of source photo URLs (Google-hosted) are stale and 404 at
+    display time. We count photos but do not validate URL liveness, so the photo
+    count can credit a listing whose images will not render.
+
+    **Mitigation today**: photo_count is computed from the array as-is; the gap is
+    cosmetic, not a ranking error.
+
+    **Real fix**: a liveness sweep at ingest (a HEAD check, dropping dead URLs
+    before computing `photo_count`), or a frontend `onerror` fallback so a dead URL
+    never renders as a broken image.
+  </Accordion>
+  <Accordion title="2. Hours coverage is 81%">
+    **Gap**: 19% of businesses have no posted hours, so open-now cannot be computed
+    for them.
+
+    **Mitigation today**: for the missing 19%, open-status defaults to 0.7
+    (soft-open) and `hard_filter` archetypes never drop them. This is an honest
+    mitigation: the alternative (dropping roughly 4,000 businesses) is worse.
+
+    **Real fix**: re-scrape hours from Google Places to push coverage toward 99%
+    and make open-status a fully reliable hard filter for the archetypes that want
+    it.
+  </Accordion>
+  <Accordion title="3. Throughput is bound by the 2-vCPU database tier">
+    **Gap**: per-query latency is fine, but sustained concurrency walls at the
+    database's 2 effective cores. The throughput knee sits right where the 2-core
+    math predicts (~80 rps).
+
+    **Mitigation today**: the wall is named and modeled, not mysterious. The load
+    bench records the server's SQL and embed split per request, so it is attributed
+    cleanly to the database, not the API box (whose embed pool has far more
+    headroom, ~900 req/s).
+
+    **Real fix**: a single lever, scale Supabase compute (XL+ adds cores), at which
+    point the next wall is the EC2 embed pool. Detail and the load table in
+    [Quality and benchmarks](/quality#speed-under-load).
+  </Accordion>
+  <Accordion title="4. The friend signal is denormalized">
+    **Gap**: `friend_count` on `businesses` is a demo-only shortcut. It is the same
+    number for every viewer.
+
+    **Mitigation today**: deterministic synthesis off the business id keeps it
+    reproducible and lets the signal be exercised and tuned.
+
+    **Real fix**: real multi-user Lemon needs a per-user `friend_reactions` join
+    and a `user_id` parameter on the recall function, so friend reactions are
+    computed for the actual requester inside the same round-trip. The "raw signals
+    out" contract does not change.
+  </Accordion>
+  <Accordion title="5. Overlay filters only partly threaded into retrieval">
+    **Gap**: `intent.Extract` produces a full `Overlay` (category, tags, price,
+    open-now), but only the categorical guard on the exact-name pin is consumed in
+    the default path.
+
+    **Mitigation today**: the category, tag, and price filters are wired into
+    `search_candidates` behind the intent flag; the SQL already accepts the
+    parameters.
+
+    **Real fix**: turn them on by default. This is plumbing, not redesign, and
+    would make "cheap rooftop cocktails" filter as precisely as it parses.
+  </Accordion>
+  <Accordion title="6. No diversity (MMR)">
+    **Gap**: coffee chains can clump near the top of a query like "coffee", because
+    sibling locations score almost identically.
+
+    **Mitigation today**: none; it is a known clumping effect on chain-heavy
+    categories.
+
+    **Real fix**: a Maximal Marginal Relevance pass after the linear sum and before
+    the top-15 cut, trading a little raw score for variety across chains, owners, or
+    neighborhoods. It operates on the already-scored list and does not touch the
+    seven-signal contract.
+  </Accordion>
+  <Accordion title="7. Bayesian-rating scale guard">
+    **Gap**: the opt-in `source: lemon_score` (0 to 10) path for the Bayesian
+    rating formula is not yet scale-corrected (it divides by 5, correct for
+    `google_rating` 0 to 5).
+
+    **Mitigation today**: the default config is unaffected; this only bites if you
+    flip both the formula and the source.
+
+    **Real fix**: a scale guard keyed to the chosen source. Small and isolated to
+    the opt-in switch.
+  </Accordion>
+</AccordionGroup>
+
+<Note>
+Per the spec: an unflagged bug we find ourselves is worse than one we flagged.
+These are all flagged. The next page,
+[Future improvements](/future), turns this inventory into a prioritized plan.
+</Note>

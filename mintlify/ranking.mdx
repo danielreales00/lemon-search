@@ -117,16 +117,28 @@ archetypes, and each archetype has its own set of weights.
     | rating | 0.18 | 0.20 | 0.20 | 0.22 | 0.20 | 0.10 |
     | popularity | 0.15 | 0.18 | 0.18 | 0.14 | 0.18 | 0.10 |
     | friends | 0.12 | 0.15 | 0.16 | 0.16 | 0.16 | 0.02 |
-    | claimed | 0.05 | 0.15 | 0.25 | 0.10 | 0.22 | 0.08 |
+    | claimed | 0.01 | 0.03 | 0.12 | 0.07 | 0.10 | 0.08 |
     | photos | 0.10 | 0.12 | 0.15 | 0.25 | 0.10 | 0.05 |
     | open_status | 0.15 | 0.10 | 0.02 | 0.05 | 0.06 | 0.20 |
     | **open behavior** | hard_filter | soft | ignore | ignore | soft | hard_filter |
 
-    The "big boost for claimed" the spec asks for lives entirely in the weight:
-    `claimed` is 0.25 for high-stakes and 0.22 for recurring service, but only a
-    tiebreaker (0.05) for low-stakes. The open-status behavior column controls
-    whether a closed business is dropped before scoring (`hard_filter`),
-    participates normally (`soft`), or is ignored (`ignore`).
+    The "big boost for claimed" the spec asks for lives entirely in the weight,
+    and it is ordered as the spec implies: `claimed` is 0.12 for high-stakes and
+    0.10 for recurring service, but only a tiebreaker (0.01) for low-stakes. The
+    open-status behavior column controls whether a closed business is dropped
+    before scoring (`hard_filter`), participates normally (`soft`), or is ignored
+    (`ignore`).
+
+    These claimed weights are the result of a measured sweep, not a first guess.
+    The synthesized claimed flag is independent of every other signal, so a large
+    claimed weight pulls unrelated claimed businesses to the top of every result
+    set. A ranking-quality harness caught this (a 14-review claimed coffee cart
+    outranking Panther Coffee with 2,550 reviews), and the sweep trimmed claimed
+    across the board with the freed weight moved into popularity and rating.
+    Result: aggregate `claimed_pct` over the 25-query set fell from 66% to 38%
+    while category precision and mean rating both ticked up. The full
+    before/after table and the story are in
+    [Decisions and judgment](/decisions#claimed-and-friends-synthesize-both-then-sweep-the-weight).
   </Tab>
 </Tabs>
 
@@ -209,17 +221,19 @@ distance:    0.25 * 0.969 = 0.2422
 rating:      0.18 * 0.920 = 0.1656
 popularity:  0.15 * 0.656 = 0.0984
 friends:     0.12 * 0.400 = 0.0480
-claimed:     0.05 * 1.000 = 0.0500
+claimed:     0.01 * 1.000 = 0.0100
 photos:      0.10 * 1.000 = 0.1000
 open_status: 0.15 * 1.000 = 0.1500
                             ------
-score                      = 0.8542
+score                      = 0.8142
 ```
 
 A similar sushi place 4 km away with 50 reviews and no friends scores about
-0.7588. The first wins by roughly 0.10: distance dominates within the
+0.7188. The first wins by roughly 0.10: distance dominates within the
 neighborhood-tight low-stakes weights, but popularity and friends are the
-differentiators between two close restaurants.
+differentiators between two close restaurants. Note how small the claimed term
+is for low-stakes (0.01): post-sweep, claimed is a tiebreaker here, not a sort
+key.
 
 For the full formula reference (every edge case, the bench numbers), see
 [docs/ranking/semantics.md](https://github.com/danielreales00/lemon-search/blob/main/docs/ranking/semantics.md)
