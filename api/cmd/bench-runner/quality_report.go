@@ -81,7 +81,7 @@ const reportPerm = 0o644
 // comparison, the aggregate table, and the per-query tables for each arm.
 func writeQualityReport(path string, qf qualityFile, runs []qualityRun) error {
 	var b strings.Builder
-	fmt.Fprintf(&b, "# Ranking-quality eval — %s\n\n", time.Now().Format("2006-01-02"))
+	fmt.Fprintf(&b, "# Ranking-quality eval - %s\n\n", time.Now().Format("2006-01-02"))
 	writeQualityIntro(&b, qf, runs)
 	writeABComparison(&b, qf, runs)
 	for i := range runs {
@@ -99,11 +99,11 @@ func writeQualityIntro(b *strings.Builder, qf qualityFile, runs []qualityRun) {
 	fmt.Fprintf(b, "Curated **%d**-query ranking-quality set run through the real pipeline ", len(qf.Queries))
 	b.WriteString("(intent overlay + single-round-trip retrieval + pure re-rank) in-process against ")
 	b.WriteString("the local Postgres (22,568 Miami businesses). Metrics are computed over the top-15 ")
-	b.WriteString("and are SPEC-DERIVED proxies for what each query should prioritize — not opinion. ")
+	b.WriteString("and are SPEC-DERIVED proxies for what each query should prioritize - not opinion. ")
 	fmt.Fprintf(b, "Dataset claimed base rate: **%.1f%%**.\n\n", qf.ClaimedBaseRate)
 	b.WriteString("The two arms differ ONLY in `signal_formulas.distance`:\n\n")
-	b.WriteString("- **literal** — spec default: `max(1 - d/30mi, 0)`\n")
-	b.WriteString("- **decay** — per-archetype `exp(-d/decay_km)` (3km utility … 80km high-stakes)\n\n")
+	b.WriteString("- **literal** - spec default: `max(1 - d/30mi, 0)`\n")
+	b.WriteString("- **decay** - per-archetype `exp(-d/decay_km)` (3km utility … 80km high-stakes)\n\n")
 	b.WriteString("Every other knob (rating mode, weights, photo/friend/open constants) is shared, ")
 	b.WriteString("read from the `-config` file, so the table isolates the distance formula.\n\n")
 	if empties := emptyQueries(runs); len(empties) > 0 {
@@ -115,7 +115,7 @@ func writeQualityIntro(b *strings.Builder, qf qualityFile, runs []qualityRun) {
 }
 
 // emptyQueries lists the queries (deduped) that returned no results in the first
-// run — a lexical-baseline gap worth surfacing, not a metric bug.
+// run - a lexical-baseline gap worth surfacing, not a metric bug.
 func emptyQueries(runs []qualityRun) []string {
 	if len(runs) == 0 {
 		return nil
@@ -142,7 +142,7 @@ func writeABComparison(b *strings.Builder, qf qualityFile, runs []qualityRun) {
 	}
 	lit := aggregateQuality(runs[0].rows)
 	dec := aggregateQuality(runs[1].rows)
-	b.WriteString("## Headline — literal vs decay\n\n")
+	b.WriteString("## Headline - literal vs decay\n\n")
 	b.WriteString("| metric | literal | decay | Δ (decay−literal) |\n|---|---|---|---|\n")
 	row := func(name string, a, c float64, fmtStr string) {
 		fmt.Fprintf(b, "| %s | "+fmtStr+" | "+fmtStr+" | "+fmtStr+" |\n", name, a, c, c-a)
@@ -157,7 +157,7 @@ func writeABComparison(b *strings.Builder, qf qualityFile, runs []qualityRun) {
 	row("diversity", lit.diversity, dec.diversity, "%.3f")
 	row("golden_precision@5", lit.goldenAt5, dec.goldenAt5, "%.3f")
 	fmt.Fprintf(b, "| new_at_rank1 (count) | %d | %d | %+d |\n", lit.newAtRank1Count, dec.newAtRank1Count, dec.newAtRank1Count-lit.newAtRank1Count)
-	fmt.Fprintf(b, "| claimed base rate | %.3f | %.3f | — |\n\n", qf.ClaimedBaseRate/100, qf.ClaimedBaseRate/100)
+	fmt.Fprintf(b, "| claimed base rate | %.3f | %.3f | - |\n\n", qf.ClaimedBaseRate/100, qf.ClaimedBaseRate/100)
 	writeABRead(b, lit, dec)
 }
 
@@ -176,7 +176,7 @@ func writeABRead(b *strings.Builder, lit, dec qualityAgg) {
 	switch {
 	case distDelta < -0.05 && catDelta >= -0.005 && ratingDelta >= -0.005:
 		b.WriteString("**Recommendation: flip the default to `decay`.** It tightens locality with no ")
-		b.WriteString("measurable cost to category precision or rating — exactly the spec's intent for ")
+		b.WriteString("measurable cost to category precision or rating - exactly the spec's intent for ")
 		b.WriteString("low-stakes/utility queries (distance should dominate near home).\n\n")
 	case distDelta >= 0:
 		b.WriteString("**Recommendation: keep `literal`.** Decay did not improve locality here, so there ")
@@ -190,7 +190,7 @@ func writeABRead(b *strings.Builder, lit, dec qualityAgg) {
 }
 
 // writeClaimedNote flags when claimed_pct runs well above the dataset base rate
-// in either arm — a separate, spec-relevant signal (the spec wants claimed to be
+// in either arm - a separate, spec-relevant signal (the spec wants claimed to be
 // a tiebreaker, not an override) that this harness now makes measurable.
 func writeClaimedNote(b *strings.Builder, lit, dec qualityAgg) {
 	const baseRate = 0.207
@@ -198,7 +198,7 @@ func writeClaimedNote(b *strings.Builder, lit, dec qualityAgg) {
 		return
 	}
 	fmt.Fprintf(b, "_Side-observation._ claimed_pct sits at %.0f%% (literal) / %.0f%% (decay) "+
-		"against a ~20.7%% base rate — above the ~2x line. Decay pulls it toward the base rate by "+
+		"against a ~20.7%% base rate - above the ~2x line. Decay pulls it toward the base rate by "+
 		"surfacing nearby (often unclaimed) places; under literal, claimed weight + popularity skew "+
 		"co-select for established, claimed businesses. Worth a follow-up claimed-weight sweep with "+
 		"this same harness.\n\n", lit.claimedPct*100, dec.claimedPct*100)
@@ -213,7 +213,7 @@ func betterWorse(good bool) string {
 
 // writePerQuerySection renders one arm's per-query table.
 func writePerQuerySection(b *strings.Builder, run *qualityRun) {
-	fmt.Fprintf(b, "## Per-query — %s\n\n", run.label)
+	fmt.Fprintf(b, "## Per-query - %s\n\n", run.label)
 	b.WriteString("| query | kind | loc | dist km (mean/med) | rating | logrev | open | cat_prec | intent | claimed | new@1 | div | golden@5 |\n")
 	b.WriteString("|---|---|---|---|---|---|---|---|---|---|---|---|---|\n")
 	for i := range run.rows {
@@ -224,11 +224,11 @@ func writePerQuerySection(b *strings.Builder, run *qualityRun) {
 
 func writeQueryRow(b *strings.Builder, r *qualityRow) {
 	if r.err != nil {
-		fmt.Fprintf(b, "| %q | %s | %s | ERR: %s |\n", r.query.Q, r.query.Kind, r.loc.Label, r.err.Error())
+		fmt.Fprintf(b, "| %q | %s | %s | ERR: %s | | | | | | | | | |\n", r.query.Q, r.query.Kind, r.loc.Label, r.err.Error())
 		return
 	}
 	if r.metrics.N == 0 {
-		fmt.Fprintf(b, "| %q | %s | %s | (no results — lexical baseline, no semantic layer) |\n", r.query.Q, r.query.Kind, r.loc.Label)
+		fmt.Fprintf(b, "| %q | %s | %s | (no results, lexical baseline) | | | | | | | | | |\n", r.query.Q, r.query.Kind, r.loc.Label)
 		return
 	}
 	m := r.metrics
@@ -242,14 +242,14 @@ func writeQueryRow(b *strings.Builder, r *qualityRow) {
 
 func catCell(m qualityMetrics) string {
 	if !m.CategoryHasExpect {
-		return "—"
+		return "-"
 	}
 	return fmt.Sprintf("%.0f%%", m.CategoryPrecision*100)
 }
 
 func intentCell(m qualityMetrics) string {
 	if m.IntentLabel == "" {
-		return "—"
+		return "-"
 	}
 	if m.IntentAdherence == intentNA {
 		return m.IntentLabel + ":n/a"
@@ -259,7 +259,7 @@ func intentCell(m qualityMetrics) string {
 
 func goldenCell(g float64) string {
 	if g == intentNA {
-		return "—"
+		return "-"
 	}
 	return fmt.Sprintf("%.0f%%", g*100)
 }
@@ -273,14 +273,14 @@ func boolCell(v bool) string {
 
 func writeMetricGlossary(b *strings.Builder) {
 	b.WriteString("## Metric definitions\n\n")
-	b.WriteString("- **dist km (mean/med)** — raw retrieval distance of the top-15. Lower = tighter locality.\n")
-	b.WriteString("- **rating** — mean `lemon_score/10` over rated results (0..1).\n")
-	b.WriteString("- **logrev** — mean `log(1+reviews)/log(1+10000)` (spec popularity signal, 0..1).\n")
-	b.WriteString("- **open** — fraction explicitly open now (unknown hours count as not-open).\n")
-	b.WriteString("- **cat_prec** — fraction whose subcategory/category matches an expected token (category-aware matching).\n")
-	b.WriteString("- **intent** — per-intent adherence: `cheap`=frac $/$$, `fancy`=frac $$$+, `open_now`=frac open; vibe intents are n/a (judged on cat_prec).\n")
-	b.WriteString("- **claimed** — fraction claimed; compare to the ~20.7% base rate (≈base good, ~2x = dominating).\n")
-	b.WriteString("- **new@1** — is the #1 result a new business? Spec: must be `no`.\n")
-	b.WriteString("- **div** — distinct name-stems / 15 (chains clumping lowers it).\n")
-	b.WriteString("- **golden@5** — precision@5 vs hand-picked anchors (— when none).\n")
+	b.WriteString("- **dist km (mean/med)** - raw retrieval distance of the top-15. Lower = tighter locality.\n")
+	b.WriteString("- **rating** - mean `lemon_score/10` over rated results (0..1).\n")
+	b.WriteString("- **logrev** - mean `log(1+reviews)/log(1+10000)` (spec popularity signal, 0..1).\n")
+	b.WriteString("- **open** - fraction explicitly open now (unknown hours count as not-open).\n")
+	b.WriteString("- **cat_prec** - fraction whose subcategory/category matches an expected token (category-aware matching).\n")
+	b.WriteString("- **intent** - per-intent adherence: `cheap`=frac $/$$, `fancy`=frac $$$+, `open_now`=frac open; vibe intents are n/a (judged on cat_prec).\n")
+	b.WriteString("- **claimed** - fraction claimed; compare to the ~20.7% base rate (≈base good, ~2x = dominating).\n")
+	b.WriteString("- **new@1** - is the #1 result a new business? Spec: must be `no`.\n")
+	b.WriteString("- **div** - distinct name-stems / 15 (chains clumping lowers it).\n")
+	b.WriteString("- **golden@5** - precision@5 vs hand-picked anchors (- when none).\n")
 }

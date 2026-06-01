@@ -88,7 +88,7 @@ func candidatesOf(ranked []rank.Result) []domain.Candidate {
 }
 
 // distanceStats returns the mean and median raw retrieval distance in km over
-// the located results (a locality proxy — lower is better for nearby-leaning
+// the located results (a locality proxy - lower is better for nearby-leaning
 // archetypes). Candidates with a null loc (the 1e9 sentinel) carry no locality
 // signal and are excluded. Returns 0,0 when no result is located.
 func distanceStats(cands []domain.Candidate) (mean, median float64) {
@@ -272,7 +272,7 @@ func nameStem(name string) string {
 
 // goldenPrecisionAt5 returns the fraction of golden anchors that appear in the
 // top-5 by name-stem (precision@5 against the hand-picked anchors). Returns -1
-// when the query has no golden anchors (the report shows "—"). The match is by
+// when the query has no golden anchors (the report shows "-"). The match is by
 // name-stem so "Sokai Sushi Bar" matches "Sokai Sushi Bar Doral".
 func goldenPrecisionAt5(golden []string, ranked []rank.Result) float64 {
 	if len(golden) == 0 {
