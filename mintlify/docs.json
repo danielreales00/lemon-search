@@ -3,11 +3,18 @@
   "theme": "mint",
   "name": "Lemon Search",
   "colors": {
-    "primary": "#E9C400",
-    "light": "#F4D738",
-    "dark": "#C7A800"
+    "primary": "#C79A00",
+    "light": "#FFE600",
+    "dark": "#C79A00"
+  },
+  "background": {
+    "decoration": "gradient"
   },
   "favicon": "/favicon.svg",
+  "logo": {
+    "light": "/logo/light.svg",
+    "dark": "/logo/dark.svg"
+  },
   "navigation": {
     "tabs": [
       {
@@ -54,8 +61,12 @@
   "navbar": {
     "links": [
       {
-        "label": "Web app",
+        "label": "Live app",
         "href": "https://lemon-search-web.vercel.app"
+      },
+      {
+        "label": "Live API",
+        "href": "https://lemonapi.danielreales.lat/search?q=sushi"
       }
     ],
     "primary": {
