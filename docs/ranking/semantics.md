@@ -1,8 +1,8 @@
-# Ranking semantics — the math
+# Ranking semantics - the math
 
 The spec contract: every candidate is scored by 7 signals, each normalized to
 [0, 1], multiplied by an archetype weight, and summed. This doc is the
-formulas — what each signal is, edge cases, and how the pipeline composes
+formulas - what each signal is, edge cases, and how the pipeline composes
 them. The Go implementation in `api/internal/rank/` is the single source of
 truth; this doc is the spec it implements.
 
@@ -11,23 +11,23 @@ truth; this doc is the spec it implements.
 ```
 candidates (≤ 150 from retrieval)
    │
-[1] hard-filter pre-pass        — drop closed-now where archetype demands it
+[1] hard-filter pre-pass        - drop closed-now where archetype demands it
    │
-[2] compute per-signal values   — 7 signals, each ∈ [0, 1]
+[2] compute per-signal values   - 7 signals, each ∈ [0, 1]
    │
-[3] linear sum                  — score = Σ weight_i · signal_i
+[3] linear sum                  - score = Σ weight_i · signal_i
    │
-[4] new-biz rating demote       — rating_signal *= 0.85 when is_new
+[4] new-biz rating demote       - rating_signal *= 0.85 when is_new
                                     (applied INSIDE step 2 in practice;
                                      surfaced here for clarity)
    │
 [5] sort descending by score
    │
-[6] exact-name pin              — prepend the name-match hit if any
+[6] exact-name pin              - prepend the name-match hit if any
    │
-[7] tie-break                   — deterministic ordering within ε
+[7] tie-break                   - deterministic ordering within ε
    │
-[8] de-pin pass                 — keep new biz out of top-2 unless dominant
+[8] de-pin pass                 - keep new biz out of top-2 unless dominant
    │
 top 15
 ```
@@ -48,7 +48,7 @@ work in absolute score space, not percentile.
 
 ## The 7 signals
 
-### 1. Distance — `signal_distance`
+### 1. Distance - `signal_distance`
 
 **Spec**: "inverse distance from a fixed user location, capped at 30 miles. Closer is higher."
 
@@ -86,7 +86,7 @@ Per-archetype `decay_km` from config:
 - `latitude/longitude` null in candidate → retrieval returns `distance_km = ∞`,
   signal is forced to 0.0.
 
-### 2. Rating — `signal_rating`
+### 2. Rating - `signal_rating`
 
 **Spec**: "reaction score / 10".
 
@@ -118,7 +118,7 @@ Where:
 - `n = 0` (bayesian): signal = m/5 (full prior pull).
 - `n → ∞`: signal → r/5.
 
-### 3. Popularity — `signal_popularity`
+### 3. Popularity - `signal_popularity`
 
 **Spec**: "reaction count, log-scaled confidence. 800 reactions should not bury 50."
 
@@ -135,7 +135,7 @@ Where `n = c.google_review_count` and `GLOBAL_MAX_REVIEWS = 10000`
 - `n > GLOBAL_MAX`: clamped to 1.0.
 - `n = 50`: ≈ 0.43. `n = 800`: ≈ 0.73. (Spec: 800 should not bury 50.)
 
-### 4. Friends — `signal_friends`
+### 4. Friends - `signal_friends`
 
 **Spec**: "synthesize a small friends-reacted dataset. Any friend reacted positively boosts; more friends, bigger boost."
 
@@ -150,7 +150,7 @@ Where `FRIENDS_FULL_CREDIT = 5` from config.
 - `friend_count ≥ 5`: signal = 1.0 (capped).
 - Demo-only: in real Lemon this is a per-user lookup, not a column.
 
-### 5. Claimed — `signal_claimed`
+### 5. Claimed - `signal_claimed`
 
 **Spec**: "Claimed gets a big boost, unclaimed gets none."
 
@@ -162,7 +162,7 @@ Pure step. The "big boost" lives entirely in the archetype weight
 (`weights.claimed` is ≥ 0.20 for `high_stakes_one_time` and
 `recurring_service` archetypes).
 
-### 6. Photos — `signal_photos`
+### 6. Photos - `signal_photos`
 
 **Spec**: "3+ photos full eligibility, under 3 a significant demotion."
 
@@ -174,7 +174,7 @@ signal_photos(c) =
 
 `PHOTO_DEMOTION_BELOW_3` from config (default 0.25).
 
-### 7. Open status — `signal_open_status`
+### 7. Open status - `signal_open_status`
 
 **Spec**: "open now beats opens-later beats closed, computed from the structured hours and a fixed current time."
 
@@ -183,7 +183,7 @@ signal_open_status(c) =
     1.0      if c.is_open_now is true
     0.3      if c is "opens later today" (closed now but opens before midnight)
     0.0      if explicitly closed all day
-    0.7      if c.hours is null (unknown — soft-open default)
+    0.7      if c.hours is null (unknown - soft-open default)
 ```
 
 The `is_open_now` and "opens later" status are computed by Postgres in the
@@ -206,7 +206,7 @@ Before scoring, drop any candidate `c` where:
 ```
 c.archetype.open_status_behavior == hard_filter
 AND
-c.is_open_now == false           # not null, not true — explicitly false
+c.is_open_now == false           # not null, not true - explicitly false
 ```
 
 Archetypes that hard-filter: `low_stakes_fast_nearby`, `utility_distance_dominant`.
@@ -220,7 +220,7 @@ archetype-specific filter logic.
 
 The retrieval phase runs a separate SQL query for the exact-name path. A
 trigram GIN pre-filter (`name % $q`) narrows candidates cheaply, then
-`lemon_name_match($q, name)` — token **coverage** plus per-word Levenshtein —
+`lemon_name_match($q, name)` - token **coverage** plus per-word Levenshtein -
 scores how much of the *full name* the query spans, typo-tolerantly:
 
 ```sql
@@ -238,7 +238,7 @@ If that path returns a row and it survives the two back-offs below, the ranker:
 3. Prepends it at position #1.
 
 Spec text: "regardless of other ranking signals." The `+Inf` is how we
-honor "regardless" literally — sort order puts it first; tie-break never
+honor "regardless" literally - sort order puts it first; tie-break never
 kicks in.
 
 The `0.8` coverage bar is `nameMatchCoverage` in
@@ -247,7 +247,7 @@ The `0.8` coverage bar is `nameMatchCoverage` in
 ### The hybrid: coverage matcher + two back-offs (Stage 3)
 
 The Stage-2 version pinned on trigram `similarity ≥ 0.85`. Trigram alone cannot
-separate a typo'd *full name* from a *category prefix* — measured on the data,
+separate a typo'd *full name* from a *category prefix* - measured on the data,
 the spec's own example `joes barbr shop → Joe's Barber Shop` scores ≈ **0.57**,
 the *same band* as the false positives (`coffee`→"Coffee To Go" 0.54,
 `sushi`→"Sushi Joe" 0.60), so no single similarity threshold separates them.
@@ -263,7 +263,7 @@ fraction of "Coffee To Go" and does not. This is the "spans most of the full
 name" discriminator the Stage-2 note deferred. `similarity(name, $q)` survives
 only as the `name_trigram` display field.
 
-**Back-off 1 — cardinality (always on).** The query also returns
+**Back-off 1 - cardinality (always on).** The query also returns
 `match_count = count(*) OVER ()`; the pin is suppressed when more than **5**
 businesses share the matched name (`maxNameMatches`). A name that resolves to
 many rows ("7-Eleven", "Subway") is a *chain*, not a unique business, and
@@ -271,23 +271,23 @@ pinning one arbitrary location ahead of a better-ranked sibling violates the
 spec's intent more than it serves it. This is a property of the data, not the
 query, so it needs no feature flag and is on unconditionally.
 
-**Back-off 2 — categorical suppression (flag-gated, `LEMON_FF_INTENT`).** The
+**Back-off 2 - categorical suppression (flag-gated, `LEMON_FF_INTENT`).** The
 search handler drops the pin when the *entire* query is composed of category /
-cuisine / domain terms — `intent.IsCategorical(q)`. So `coffee` and `spa` rank
+cuisine / domain terms - `intent.IsCategorical(q)`. So `coffee` and `spa` rank
 their candidates instead of pinning a business literally named that, while
 `joes barbr shop` (no categorical token) still pins. The intent lexicon already
 knows which tokens are taxonomy leaves (Café→Coffee Shop, …), so this is the
 "suppress when the query is a known taxonomy term" discriminator the Stage-2
 note called for. It rides behind `LEMON_FF_INTENT` because it depends on the
 intent layer; with the flag off, only the cardinality back-off applies. A query
-of *only* price/time modifiers (`cheap`, `open now`) is **not** categorical —
-those entries narrow by price/open-now, not category — so the pin may still
+of *only* price/time modifiers (`cheap`, `open now`) is **not** categorical -
+those entries narrow by price/open-now, not category - so the pin may still
 serve it.
 
 The pin remains a max-cost override (a false positive is catastrophic; a false
 negative merely demotes a still-ranked result), so all three conditions are
 tuned to favor precision. Measured effect: the `over_fire` bench mode went from
-**76% → 100%** (25/25) while typo held at **97%** — see
+**76% → 100%** (25/25) while typo held at **97%** - see
 [the over-fire resolution in the writeup](../writeup.md#spec-ambiguities--calls).
 
 The pin still folds *into* the main retrieval (for real distance and one fewer
@@ -376,7 +376,7 @@ friends:  0
 score ≈ 0.7588
 ```
 
-First candidate wins by ~0.10 — distance dominates within the
+First candidate wins by ~0.10 - distance dominates within the
 neighborhood-tight `low_stakes` weights, but the `popularity` and
 `friends` contributions matter as differentiators between two close
 restaurants.
