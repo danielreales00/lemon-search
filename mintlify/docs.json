@@ -1,0 +1,83 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "theme": "mint",
+  "name": "Lemon Search",
+  "colors": {
+    "primary": "#C79A00",
+    "light": "#FFE600",
+    "dark": "#C79A00"
+  },
+  "background": {
+    "decoration": "gradient"
+  },
+  "favicon": "/favicon.svg",
+  "logo": {
+    "light": "/logo/light.svg",
+    "dark": "/logo/dark.svg"
+  },
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Guide",
+        "groups": [
+          {
+            "group": "Get started",
+            "pages": [
+              "overview",
+              "how-it-works"
+            ]
+          },
+          {
+            "group": "The engine",
+            "pages": [
+              "architecture",
+              "ranking",
+              "intent-and-semantic"
+            ]
+          },
+          {
+            "group": "Build on it",
+            "pages": [
+              "extending",
+              "future",
+              "operations"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API reference",
+        "groups": [
+          {
+            "group": "Reference",
+            "pages": [
+              "api-reference/search"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "navbar": {
+    "links": [
+      {
+        "label": "Live app",
+        "href": "https://lemon-search-web.vercel.app"
+      },
+      {
+        "label": "Live API",
+        "href": "https://lemonapi.danielreales.lat/search?q=sushi"
+      }
+    ],
+    "primary": {
+      "type": "button",
+      "label": "GitHub",
+      "href": "https://github.com/danielreales00/lemon-search"
+    }
+  },
+  "footer": {
+    "socials": {
+      "github": "https://github.com/danielreales00/lemon-search"
+    }
+  }
+}

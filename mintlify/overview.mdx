@@ -1,0 +1,91 @@
+---
+title: "Lemon Search"
+description: "A fast, forgiving, smart search and ranking engine over Miami's local businesses."
+---
+
+Lemon Search is the engine that turns a half-typed query into the right local
+business, ranked well, in under the blink of an eye. It searches roughly 23,000
+real Miami businesses (restaurants, salons, gyms, tow trucks, wedding
+photographers, and everything in between) and returns the top 15 results as you
+type. The user interface is intentionally thin: the engine is the product.
+
+<Frame caption="The live web app: results as you type, top 15 ranked, with a per-query speed pill.">
+  <img src="/images/app-hero.png" alt="Lemon Search web app home screen" noZoom />
+</Frame>
+
+<CardGroup cols={3}>
+  <Card title="23,000 businesses" icon="store" horizontal>
+    Real Miami data, one search index.
+  </Card>
+  <Card title="Sub-100ms p95" icon="bolt" horizontal>
+    Server-side, on every keystroke.
+  </Card>
+  <Card title="7 signals, 6 archetypes" icon="sliders" horizontal>
+    Tuned per category, in config.
+  </Card>
+</CardGroup>
+
+<CardGroup cols={2}>
+  <Card title="Try the web app" icon="globe" href="https://lemon-search-web.vercel.app">
+    The live search bar with results as you type.
+  </Card>
+  <Card title="Call the API" icon="code" href="/api-reference/search">
+    One endpoint, GET /search, returns ranked JSON.
+  </Card>
+</CardGroup>
+
+## The problem it solves
+
+People do not type clean queries. They misspell, they abbreviate, they describe a
+vibe instead of a name, and they expect the right answer instantly. A plain
+keyword search fails all of that: it cannot tell that "joes barbr shop" means
+"Joe's Barber Shop", that "cheap restaurants" is about price, or that a sushi
+restaurant two blocks away should beat one across the city. Lemon Search is built
+to feel like it understands what you meant, not just what you typed.
+
+## What makes it good
+
+<CardGroup cols={2}>
+  <Card title="Real typo tolerance" icon="spell-check">
+    "steaak" finds steak, "joes barbr" finds Joe's Barber Shop. Misspellings,
+    dropped letters, and accents (café vs cafe) all resolve to the right
+    business.
+  </Card>
+  <Card title="Smart intent" icon="brain">
+    "cheap restaurants" prioritizes affordable spots by price tier. "chill place
+    to work" finds the right vibe even with no keyword to match on, using a small
+    local language model.
+  </Card>
+  <Card title="Sub-100ms speed" icon="bolt">
+    Every keystroke returns in well under a tenth of a second at the 95th
+    percentile. Speed is treated as a hard constraint, measured under load, not
+    an afterthought.
+  </Card>
+  <Card title="Ranking that feels right" icon="trophy">
+    Results are scored on seven signals (distance, rating, popularity, friends,
+    claimed status, photos, open-now) weighted differently for a restaurant than
+    for a tow truck.
+  </Card>
+</CardGroup>
+
+## Who this documentation is for
+
+This site serves two readers at once.
+
+<CardGroup cols={2}>
+  <Card title="If you run a business or product" icon="lightbulb">
+    Start with [Overview](/overview), [How it works](/how-it-works), and the
+    plain-English half of [Ranking explained](/ranking). No jargon required.
+  </Card>
+  <Card title="If you build software" icon="terminal">
+    Jump to [Architecture](/architecture), the [API reference](/api-reference/search),
+    and [Extending the system](/extending) to wire in the next surface.
+  </Card>
+</CardGroup>
+
+<Note>
+This engine was built as a focused trial: a retrieval-and-ranking core plus a
+search bar. Throughout these pages we are careful to mark what is **built and
+running** versus what is **aspirational** or planned for a later version, so you
+always know which is which.
+</Note>

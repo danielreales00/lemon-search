@@ -1,0 +1,172 @@
+---
+title: "Smart intent and semantic search"
+description: "How cheap restaurants maps to price, and how vibe queries work via local embeddings."
+---
+
+The spec asks for "lightweight intent understanding beyond strict keyword
+matching" and explicitly says it does not need full LLM-based retrieval. Lemon
+Search meets this with two layers: a fast lexicon for structured intent, and a
+small local embedding model for open-ended vibe queries. Both improve
+**retrieval** (which businesses become candidates), not the seven-signal ranking,
+which stays exactly as the spec defines it.
+
+## Layer one: the intent lexicon
+
+The lexicon is a pure, sub-millisecond function that reads head terms in the query
+and produces a filter-and-boost overlay. No LLM, no embeddings, no network. It is
+a static Go table frozen at startup.
+
+<Tabs>
+  <Tab title="In plain English">
+    Certain words carry obvious intent, and the lexicon maps them to filters:
+
+    - **"cheap restaurants"** maps "cheap" to a price filter (the cheap and
+      moderate tiers) and "restaurants" to the food category. You get affordable
+      food, ranked.
+    - **"i'm hungry"** maps to the food category plus require-open-now, so you
+      get nearby open places to eat.
+    - **"open now"** and **"tonight"** require the business to be open.
+    - **"date night", "kid friendly", "rooftop", "cozy"** map to matching tags.
+    - **"wedding photographer"** narrows to the events category and the
+      photography subcategory.
+
+    The query is lowercased and accent-stripped first (café becomes cafe), so
+    misspellings of accents do not break the match.
+  </Tab>
+  <Tab title="The math">
+    `intent.Extract(query)` returns a `domain.Overlay`:
+
+    ```go
+    type Overlay struct {
+        CategoryFilter      *string   // e.g. "Food & Drinks"
+        SubcategoryFilter   []string
+        UniversalTagFilter  []string  // ANDed via array-overlap
+        SpecificTagFilter   []string
+        PriceFilter         []string  // ["$", "$$"]
+        RequireOpenNow      bool
+    }
+    ```
+
+    Tokenization: lowercase, unaccent (NFD normalize plus strip combining marks),
+    split on non-alphanumeric. The extractor checks every unigram and consecutive
+    bigram against the lexicon. Matching entries merge additively: string filters
+    are last-write-wins, slice filters union, booleans OR. The Postgres adapter
+    consumes the overlay and adds equivalent WHERE clauses to the recall query.
+
+    It deliberately does **not** override archetype assignment (archetype stays a
+    per-business property) and does not rewrite the query for the text-match path.
+    It only narrows the candidate set.
+  </Tab>
+</Tabs>
+
+<Note>
+The lexicon is gated behind the `LEMON_FF_INTENT` feature flag while it is still
+being expanded. Adding a new mapped term is a one-line addition to the Go table.
+Today its main wired consumer is the categorical guard on the exact-name pin
+(below); threading the full price and tag filters into the recall SQL is the next
+step, and the recall function already accepts those parameters.
+</Note>
+
+## Layer two: semantic recall for vibe queries
+
+The lexicon nails the spec's examples for free, but it cannot scale to
+open-vocabulary vibe queries: "chill place to work", "somewhere romantic for an
+anniversary", "thinking about getting some ink". Every new vibe word would need a
+hand-mapping. That is the one place a sentence-embedding model is genuinely
+load-bearing.
+
+<Tabs>
+  <Tab title="In plain English">
+    Each business is turned into a list of numbers (an embedding) that captures
+    its meaning, computed once at ingest from its name, category, tags, and
+    description. When you type a vibe query, the query is turned into numbers the
+    same way, and the database finds businesses whose numbers are closest. "chill
+    place to work" lands near quiet cafés and coworking spaces even though none of
+    those words appear in their listings.
+
+    This runs as an additional recall channel: it pulls in semantically similar
+    businesses, which then join the normal candidate pool and get ranked by the
+    same seven signals. It never adds an eighth ranking signal and never overrides
+    the exact-name or typo guarantees.
+  </Tab>
+  <Tab title="The math">
+    - **Model**: `all-MiniLM-L6-v2`, 384 dimensions. One model serves both ingest
+      and query, because cosine recall is only meaningful when the business vector
+      and query vector live in the same learned space.
+    - **Storage**: a `vector(384)` column on `businesses`, indexed with HNSW using
+      `vector_cosine_ops`, via the `pgvector` extension.
+    - **Recall blend**: the recall SQL adds a vector channel
+      (`embedding <=> query_vec`) that UNIONs into the candidate pool under the
+      same overlay filters, fused with the lexical lists. A null or absent query
+      vector is a harmless no-op.
+    - **Flag**: gated by `LEMON_FF_SEMANTIC`. With the flag off, behavior is
+      exactly the lexical path.
+
+    Why MiniLM and not a bigger model: it is the only choice that embeds a query
+    in-process per keystroke (roughly 2ms with the in-process ONNX runtime) and
+    still holds the sub-100ms budget. A heavier long-context model would cost
+    40 to 80ms for text that does not move vibe recall, since the vibe signal
+    (tags plus the lead sentences of the description) sits inside MiniLM's
+    256-token window. See
+    [ADR-0006](https://github.com/danielreales00/lemon-search/blob/main/docs/adr/0006-semantic-embeddings.md).
+  </Tab>
+</Tabs>
+
+### Keeping it under the latency budget
+
+Semantic search is only worth it if it stays fast. The embedding runtime was
+measured three ways on the same model and harness:
+
+| Runtime | Embed time | Verdict |
+|---|---|---|
+| Pure-Go interpreter (GoMLX) | ~67ms | Fails the 100ms gate |
+| Ollama sidecar | ~15ms | Clears, but needs a separate process |
+| In-process ONNX Runtime | ~1 to 2ms | Chosen: fastest, single binary |
+
+The in-process ONNX path is roughly nine times faster than the sidecar and needs
+no extra process, at the cost of linking two native C libraries. The HNSW vector
+probe in Postgres is about 1ms, so the vectors are nearly free; the cost is the
+embed, and that is now a couple of milliseconds of CPU. Measured quality lift on
+24 hand-labeled vibe queries: pass-at-3 rose from 50% to 88% with zero
+regressions on lexical queries.
+
+## The exact-name pin and its guards
+
+The trickiest interaction between intent and ranking is the exact-name pin. The
+spec says typing a business name "returns that business first, regardless of other
+ranking signals", but also that a category match "surfaces" businesses of that
+category. These are different verbs and must not be conflated: "coffee" should
+rank coffee shops, not pin a business literally named "Coffee To Go".
+
+The naive approach (pin anything whose name is similar to the query) fails,
+because trigram similarity cannot separate a misspelled full name from a category
+prefix. The spec's own example "joes barbr shop" scores about 0.57, the same band
+as the false positives "coffee" (0.54) and "sushi" (0.60). No single threshold
+separates them, so the pin layers three orthogonal conditions:
+
+<Steps>
+  <Step title="Coverage, not raw similarity">
+    A coverage matcher (`lemon_name_match`) asks how much of the full business
+    name the query spans, tolerating per-word typos with Levenshtein distance. A
+    misspelled full name like "joes barbr shop" covers "Joe's Barber Shop" and
+    clears the 0.8 bar; a single category word covers only a fraction of "Coffee
+    To Go" and does not.
+  </Step>
+  <Step title="Cardinality back-off (always on)">
+    No pin when more than five businesses share the matched name. A name like
+    "7-Eleven" or "Subway" is a chain, not a unique business, so pinning one
+    arbitrary location ahead of a better-ranked sibling would violate the spec's
+    intent.
+  </Step>
+  <Step title="Categorical suppression (flag-gated)">
+    No pin when the entire query is category, cuisine, or domain terms
+    (`intent.IsCategorical`). So "coffee" and "spa" rank their candidates, while
+    "joes barbr shop" still pins. This rides behind the intent flag because it
+    depends on the lexicon knowing which tokens are taxonomy leaves.
+  </Step>
+</Steps>
+
+The measured effect: the over-fire test (category words wrongly pinning) went from
+76% to 100% while typo recall held at 97%. The pin is a maximum-cost override (a
+false positive is catastrophic, a false negative merely demotes a still-ranked
+result), so all three conditions favor precision.
