@@ -52,18 +52,18 @@ const candidateColumns = `
 	is_new, is_open_now, opens_later, hours`
 
 // searchSQL invokes the retrieval function, threading the intent overlay
-// (contract C5) as bound params $6–$11 and the optional query embedding as $12.
+// (contract C5) as bound params $6-$11 and the optional query embedding as $12.
 // A zero overlay yields no-op params (nil category, empty arrays, false
-// require-open); a nil $12 (NULL::vector) disables the semantic channel — both
+// require-open); a nil $12 (NULL::vector) disables the semantic channel - both
 // make retrieval identical to passing nothing.
 const searchSQL = `
 	select ` + candidateColumns + `
 	from search_candidates($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::vector)`
 
-// exactNameSQL is the separate exact-name path: 0–1 rows. A trigram GIN
+// exactNameSQL is the separate exact-name path: 0-1 rows. A trigram GIN
 // pre-filter (name % $1, plus an ilike prefix arm) narrows candidates cheaply,
 // then a row pins if EITHER it is a full-name match (lemon_name_match spans the
-// name — typo'd full names pin, category prefixes don't) OR a confident
+// name - typo'd full names pin, category prefixes don't) OR a confident
 // in-order PREFIX (lemon_prefix_match: a multi-token name fragment like
 // "best florida pest" -> "Best Florida Pest Control"). The pin ranks on the
 // better of the two coverage scores. It carries no user location (the pin
@@ -71,8 +71,8 @@ const searchSQL = `
 // wall-clock now() for display only. See docs/ranking/semantics.md §"Exact-name
 // pin".
 //
-// match_count is count(*) over () — the number of businesses matching the same
-// predicate, computed before LIMIT — so ExactName can back off when a name is
+// match_count is count(*) over () - the number of businesses matching the same
+// predicate, computed before LIMIT - so ExactName can back off when a name is
 // shared by many locations (see maxNameMatches).
 const exactNameSQL = `
 	select
@@ -155,10 +155,10 @@ func (r *Repo) Search(ctx context.Context, q string, opts domain.SearchOpts) ([]
 	return out, nil
 }
 
-// ExactName returns at most one candidate whose name matches q — either a
+// ExactName returns at most one candidate whose name matches q - either a
 // full-name match (token coverage >= nameMatchCoverage, per-word typo-tolerant)
 // or a confident in-order PREFIX (lemon_prefix_match >= prefixMatchCoverage, for
-// partial-name fragments). found=false (with a nil error) means no pin — not an
+// partial-name fragments). found=false (with a nil error) means no pin - not an
 // error. When the name is shared by more than maxNameMatches businesses it is
 // ambiguous (not a unique name), so the pin backs off too.
 func (r *Repo) ExactName(ctx context.Context, q string) (c domain.Candidate, found bool, err error) {
@@ -203,7 +203,7 @@ func nilToEmpty(s []string) []string {
 }
 
 // vectorParam encodes a query embedding as a pgvector text literal ("[0.1,0.2]")
-// for the $12::vector bind, or returns nil (SQL NULL) when there is no vector —
+// for the $12::vector bind, or returns nil (SQL NULL) when there is no vector -
 // which makes the semantic recall channel a no-op. pgx has no native pgvector
 // codec, so the text literal + cast is the registered path (mirrors the ingest
 // writer). 'g'/-1 is the shortest round-trippable form of each float32.
