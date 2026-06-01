@@ -459,6 +459,27 @@ quietly deviating.
   of every result set). Higher-stakes archetypes keep their larger claimed
   weight, which is correct per spec (claimed/verified matters more for weddings
   and contractors).
+  - **Follow-up: the full claimed-weight sweep (`cmd/bench-runner -quality`).**
+    The ranking-quality harness then showed the over-domination was not confined
+    to low-stakes: aggregate `claimed_pct` over the 25-query set sat at **66%**
+    (literal), ~3x the 20.7% base rate, driven mostly by the *other* archetypes,
+    whose claimed weights were still large (medium 0.15, high-stakes 0.25,
+    recurring 0.22). Because the synthesized flag is **independent of every other
+    signal** (a hash of the `id`), a large claimed weight pulls unrelated claimed
+    businesses to the top of every result set - the harness floor with claimed
+    weight zeroed everywhere is ~28%, so the claimed weight was the entire lever
+    between 28% and 66%. We used the harness as an A/B rig and trimmed claimed
+    across the board, moving the freed weight into the spec's quality signals
+    (`popularity`, `rating`): low 0.05 → 0.01, medium 0.15 → 0.03, high-stakes
+    0.25 → 0.12, recurring 0.22 → 0.10, experiential 0.10 → 0.07 (utility already
+    low at 0.08). The spec ordering still holds - claimed matters more for
+    high-stakes/recurring than for food - but it is now a tiebreaker, not a sort
+    key. Result: aggregate `claimed_pct` **66% → 38%** (literal) / **55% → 34%**
+    (decay), with `category_precision` **86% → 87%** and `mean_rating`
+    **0.916 → 0.919** (both slightly *up*, i.e. no quality cost). The
+    medium/high-stakes probe queries that came back near-fully-claimed now do
+    not: gym 100% → ~30%, barber 100% → ~47%, spa 100% → 60%, nail 93% → 60%,
+    tattoo 100% → 53%, each at 100% category precision.
 - **`lemon_score` skew (mean ≈ 9).** Kept the literal `lemon_score / 10` as the
   contract; surfaced Bayesian-smoothed `google_rating` as an opt-in switch.
 - **Exact-name "boost" vs category-aware matching (the over-fire fix).** The

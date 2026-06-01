@@ -70,9 +70,9 @@ archetypes:
     weights:
       distance: 0.25
       rating: 0.18
-      popularity: 0.15      # raised from 0.12 — "more reactions = more confidence"
+      popularity: 0.19      # raised from 0.12 — "more reactions = more confidence"
       friends: 0.12
-      claimed: 0.05         # trimmed from 0.08: a tiebreaker here, not an override
+      claimed: 0.01         # trimmed to a faint tiebreaker: claimed must not dominate food queries
       photos: 0.10
       open_status: 0.15
     open_status: hard_filter
@@ -80,10 +80,10 @@ archetypes:
   medium_stakes_occasion:        # gyms, salons, barbers, spas, ...
     weights:
       distance: 0.10
-      rating: 0.20
-      popularity: 0.18
+      rating: 0.25
+      popularity: 0.25
       friends: 0.15
-      claimed: 0.15
+      claimed: 0.03         # trimmed from 0.15: above food, but a tiebreaker — not a dominator
       photos: 0.12
       open_status: 0.10
     open_status: soft
@@ -91,10 +91,10 @@ archetypes:
   high_stakes_one_time:          # weddings, contractors, photographers, ...
     weights:
       distance: 0.04
-      rating: 0.20
-      popularity: 0.18
+      rating: 0.26
+      popularity: 0.25
       friends: 0.16
-      claimed: 0.25            # "big boost for claimed"
+      claimed: 0.12            # spec's "big boost", but kept above medium/low — not a dominator
       photos: 0.15
       open_status: 0.02
     open_status: ignore
@@ -103,9 +103,9 @@ archetypes:
     weights:
       distance: 0.08
       rating: 0.22
-      popularity: 0.14
+      popularity: 0.17
       friends: 0.16
-      claimed: 0.10
+      claimed: 0.07         # trimmed from 0.10: tiebreaker, not a dominator
       photos: 0.25
       open_status: 0.05
     open_status: ignore
@@ -113,10 +113,10 @@ archetypes:
   recurring_service:              # cleaners, dog walkers, meal prep, ...
     weights:
       distance: 0.08
-      rating: 0.20
-      popularity: 0.18
+      rating: 0.25
+      popularity: 0.25
       friends: 0.16
-      claimed: 0.22
+      claimed: 0.10         # trimmed from 0.22: above medium, below high-stakes — not a dominator
       photos: 0.10
       open_status: 0.06
     open_status: soft

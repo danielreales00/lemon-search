@@ -15,87 +15,85 @@ Every other knob (rating mode, weights, photo/friend/open constants) is shared, 
 
 | metric | literal | decay | Δ (decay−literal) |
 |---|---|---|---|
-| mean_distance_km | 8.13 | 6.12 | -2.01 |
-| median_distance_km | 7.79 | 5.54 | -2.25 |
-| mean_rating (0..1) | 0.916 | 0.908 | -0.008 |
-| mean_log_reviews (0..1) | 0.686 | 0.651 | -0.035 |
-| pct_open | 0.97 | 0.95 | -0.03 |
-| category_precision | 0.860 | 0.854 | -0.006 |
-| claimed_pct | 0.661 | 0.548 | -0.112 |
-| diversity | 0.927 | 0.948 | 0.021 |
+| mean_distance_km | 6.83 | 5.17 | -1.66 |
+| median_distance_km | 6.09 | 4.39 | -1.70 |
+| mean_rating (0..1) | 0.919 | 0.914 | -0.006 |
+| mean_log_reviews (0..1) | 0.720 | 0.678 | -0.043 |
+| pct_open | 0.98 | 0.95 | -0.03 |
+| category_precision | 0.867 | 0.863 | -0.003 |
+| claimed_pct | 0.382 | 0.336 | -0.045 |
+| diversity | 0.927 | 0.924 | -0.003 |
 | golden_precision@5 | 0.500 | 0.500 | 0.000 |
 | new_at_rank1 (count) | 0 | 0 | +0 |
 | claimed base rate | 0.207 | 0.207 | - |
 
 **Read.** Decay is worth flipping the spec default only if it improves locality (lower mean distance) *without* hurting category_precision or rating. Movement:
 
-- distance: -2.01 km (better)
-- category_precision: -0.006 (worse)
-- rating: -0.008 (worse)
+- distance: -1.66 km (better)
+- category_precision: -0.003 (worse)
+- rating: -0.006 (worse)
 
 **Recommendation: keep `literal` as the default; ship `decay` as the documented opt-in switch.** Decay tightens locality but the trade against category/rating is not clean enough to override the spec contract by default.
-
-_Side-observation._ claimed_pct sits at 66% (literal) / 55% (decay) against a ~20.7% base rate - above the ~2x line. Decay pulls it toward the base rate by surfacing nearby (often unclaimed) places; under literal, claimed weight + popularity skew co-select for established, claimed businesses. Worth a follow-up claimed-weight sweep with this same harness.
 
 ## Per-query - literal
 
 | query | kind | loc | dist km (mean/med) | rating | logrev | open | cat_prec | intent | claimed | new@1 | div | golden@5 |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
-| "sushi" | category | Downtown Miami | 3.06 / 1.54 | 0.907 | 0.700 | 100% | 100% | - | 73% | no | 0.87 | 100% |
-| "coffee" | category | Downtown Miami | 5.33 / 5.88 | 0.936 | 0.678 | 100% | 87% | - | 80% | no | 1.00 | 0% |
-| "gym" | category | Downtown Miami | 11.70 / 12.15 | 0.905 | 0.513 | 80% | 100% | - | 100% | no | 0.87 | - |
-| "barber" | category | Downtown Miami | 12.48 / 12.04 | 0.957 | 0.549 | 100% | 100% | - | 100% | no | 1.00 | - |
-| "nail salon" | category | Downtown Miami | 13.92 / 13.65 | 0.915 | 0.520 | 87% | 100% | - | 93% | no | 1.00 | - |
-| "tacos" | category | Downtown Miami | 4.57 / 6.03 | 0.941 | 0.888 | 100% | 100% | - | 67% | no | 0.93 | - |
-| "pizza" | category | Downtown Miami | 4.93 / 5.60 | 0.921 | 0.707 | 100% | 100% | - | 67% | no | 0.93 | - |
-| "spa" | category | Downtown Miami | 8.45 / 7.74 | 0.900 | 0.558 | 100% | 100% | - | 100% | no | 1.00 | - |
-| "tattoo" | category | Downtown Miami | 8.93 / 6.06 | 0.968 | 0.583 | 93% | 100% | - | 100% | no | 0.93 | - |
-| "ramen" | category | Downtown Miami | 5.15 / 1.97 | 0.903 | 0.766 | 100% | 33% | - | 33% | no | 0.80 | - |
-| "steakhouse" | category | Downtown Miami | 6.88 / 6.19 | 0.939 | 0.859 | 100% | 93% | - | 67% | no | 0.80 | - |
-| "cheap restaurants" | intent | Downtown Miami | 5.36 / 4.74 | 0.888 | 0.818 | 100% | 87% | cheap:100% | 73% | no | 1.00 | - |
-| "open now" | intent | Downtown Miami | 7.13 / 6.71 | 0.880 | 0.760 | 100% | - | open_now:100% | 60% | no | 1.00 | - |
+| "sushi" | category | Downtown Miami | 4.00 / 1.54 | 0.915 | 0.719 | 100% | 100% | - | 53% | no | 0.87 | 100% |
+| "coffee" | category | Downtown Miami | 4.76 / 2.24 | 0.935 | 0.696 | 100% | 87% | - | 67% | no | 1.00 | 0% |
+| "gym" | category | Downtown Miami | 6.14 / 4.24 | 0.912 | 0.636 | 87% | 100% | - | 33% | no | 0.80 | - |
+| "barber" | category | Downtown Miami | 5.05 / 3.21 | 0.976 | 0.631 | 100% | 100% | - | 47% | no | 0.93 | - |
+| "nail salon" | category | Downtown Miami | 11.32 / 11.24 | 0.914 | 0.568 | 87% | 100% | - | 53% | no | 1.00 | - |
+| "tacos" | category | Downtown Miami | 3.85 / 3.56 | 0.943 | 0.931 | 100% | 100% | - | 40% | no | 0.87 | - |
+| "pizza" | category | Downtown Miami | 3.51 / 2.26 | 0.908 | 0.758 | 100% | 100% | - | 20% | no | 1.00 | - |
+| "spa" | category | Downtown Miami | 6.82 / 6.65 | 0.936 | 0.619 | 100% | 100% | - | 60% | no | 1.00 | - |
+| "tattoo" | category | Downtown Miami | 8.09 / 6.37 | 0.968 | 0.729 | 100% | 100% | - | 53% | no | 0.80 | - |
+| "ramen" | category | Downtown Miami | 3.35 / 1.34 | 0.895 | 0.763 | 100% | 40% | - | 13% | no | 0.87 | - |
+| "steakhouse" | category | Downtown Miami | 5.36 / 5.74 | 0.944 | 0.895 | 100% | 100% | - | 27% | no | 0.87 | - |
+| "cheap restaurants" | intent | Downtown Miami | 4.30 / 3.85 | 0.887 | 0.808 | 100% | 73% | cheap:100% | 47% | no | 1.00 | - |
+| "open now" | intent | Downtown Miami | 5.90 / 3.17 | 0.887 | 0.764 | 100% | - | open_now:100% | 47% | no | 1.00 | - |
 | "fancy dinner" | intent | Downtown Miami | (no results, lexical baseline) | | | | | | | | | |
 | "date night" | intent | Downtown Miami | 8.97 / 9.74 | 0.842 | 0.512 | 80% | 100% | date_night:n/a | 0% | no | 1.00 | - |
 | "i'm hungry" | intent | Downtown Miami | (no results, lexical baseline) | | | | | | | | | |
-| "outdoor seating" | intent | Downtown Miami | 4.42 / 5.89 | 0.912 | 0.749 | 100% | 53% | outdoor:n/a | 47% | no | 1.00 | - |
+| "outdoor seating" | intent | Downtown Miami | 4.60 / 5.97 | 0.912 | 0.772 | 100% | 60% | outdoor:n/a | 33% | no | 1.00 | - |
 | "chill place to work" | vibe | Downtown Miami | 22.27 / 22.27 | 0.900 | 0.643 | 100% | 0% | work:n/a | 0% | no | 1.00 | - |
 | "somewhere to get pampered" | vibe | Downtown Miami | (no results, lexical baseline) | | | | | | | | | |
-| "coffee" | geo | Brickell | 5.48 / 5.26 | 0.936 | 0.678 | 100% | 87% | - | 80% | no | 1.00 | - |
-| "coffee" | geo | Miami Beach | 8.28 / 6.66 | 0.929 | 0.679 | 100% | 80% | - | 80% | no | 1.00 | - |
-| "coffee" | geo | Hialeah | 12.09 / 12.12 | 0.925 | 0.694 | 100% | 87% | - | 67% | no | 0.87 | - |
-| "sushi" | geo | Brickell | 3.54 / 2.39 | 0.905 | 0.732 | 100% | 100% | - | 67% | no | 0.87 | - |
-| "sushi" | geo | Miami Beach | 6.73 / 6.63 | 0.916 | 0.686 | 100% | 100% | - | 67% | no | 0.80 | - |
-| "sushi" | geo | Hialeah | 9.06 / 10.01 | 0.928 | 0.815 | 100% | 100% | - | 33% | no | 0.73 | - |
+| "coffee" | geo | Brickell | 4.95 / 3.58 | 0.931 | 0.696 | 100% | 87% | - | 67% | no | 0.93 | - |
+| "coffee" | geo | Miami Beach | 7.20 / 6.37 | 0.915 | 0.665 | 100% | 80% | - | 53% | no | 1.00 | - |
+| "coffee" | geo | Hialeah | 11.34 / 11.43 | 0.920 | 0.734 | 100% | 93% | - | 40% | no | 0.87 | - |
+| "sushi" | geo | Brickell | 3.81 / 2.93 | 0.923 | 0.730 | 100% | 100% | - | 40% | no | 0.93 | - |
+| "sushi" | geo | Miami Beach | 5.61 / 6.34 | 0.928 | 0.755 | 100% | 100% | - | 20% | no | 0.87 | - |
+| "sushi" | geo | Hialeah | 9.09 / 10.01 | 0.937 | 0.823 | 100% | 100% | - | 27% | no | 0.80 | - |
 
 ## Per-query - decay
 
 | query | kind | loc | dist km (mean/med) | rating | logrev | open | cat_prec | intent | claimed | new@1 | div | golden@5 |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
-| "sushi" | category | Downtown Miami | 1.50 / 1.07 | 0.913 | 0.651 | 100% | 100% | - | 60% | no | 0.93 | 100% |
-| "coffee" | category | Downtown Miami | 1.68 / 0.92 | 0.919 | 0.632 | 100% | 93% | - | 47% | no | 1.00 | 0% |
-| "gym" | category | Downtown Miami | 9.97 / 10.09 | 0.905 | 0.543 | 80% | 100% | - | 93% | no | 0.87 | - |
-| "barber" | category | Downtown Miami | 11.02 / 11.39 | 0.948 | 0.548 | 93% | 100% | - | 100% | no | 1.00 | - |
-| "nail salon" | category | Downtown Miami | 12.04 / 11.49 | 0.895 | 0.516 | 87% | 100% | - | 93% | no | 1.00 | - |
-| "tacos" | category | Downtown Miami | 2.09 / 1.16 | 0.925 | 0.803 | 100% | 100% | - | 60% | no | 0.87 | - |
-| "pizza" | category | Downtown Miami | 1.35 / 0.78 | 0.892 | 0.662 | 100% | 100% | - | 27% | no | 1.00 | - |
-| "spa" | category | Downtown Miami | 8.45 / 7.74 | 0.900 | 0.558 | 100% | 100% | - | 100% | no | 1.00 | - |
-| "tattoo" | category | Downtown Miami | 8.21 / 5.39 | 0.968 | 0.565 | 100% | 100% | - | 100% | no | 0.93 | - |
+| "sushi" | category | Downtown Miami | 1.65 / 1.07 | 0.911 | 0.690 | 100% | 100% | - | 53% | no | 0.93 | 100% |
+| "coffee" | category | Downtown Miami | 1.36 / 0.92 | 0.917 | 0.606 | 100% | 93% | - | 40% | no | 1.00 | 0% |
+| "gym" | category | Downtown Miami | 4.33 / 3.24 | 0.921 | 0.621 | 80% | 100% | - | 27% | no | 0.80 | - |
+| "barber" | category | Downtown Miami | 4.40 / 2.24 | 0.976 | 0.623 | 100% | 100% | - | 47% | no | 0.93 | - |
+| "nail salon" | category | Downtown Miami | 10.49 / 8.31 | 0.914 | 0.558 | 87% | 100% | - | 53% | no | 1.00 | - |
+| "tacos" | category | Downtown Miami | 1.72 / 1.11 | 0.913 | 0.808 | 100% | 100% | - | 40% | no | 0.87 | - |
+| "pizza" | category | Downtown Miami | 1.37 / 0.78 | 0.889 | 0.681 | 100% | 100% | - | 20% | no | 1.00 | - |
+| "spa" | category | Downtown Miami | 4.68 / 4.88 | 0.952 | 0.598 | 93% | 100% | - | 47% | no | 1.00 | - |
+| "tattoo" | category | Downtown Miami | 6.53 / 6.06 | 0.973 | 0.721 | 100% | 100% | - | 53% | no | 0.87 | - |
 | "ramen" | category | Downtown Miami | 2.12 / 0.98 | 0.887 | 0.723 | 87% | 33% | - | 13% | no | 0.93 | - |
-| "steakhouse" | category | Downtown Miami | 3.16 / 1.36 | 0.923 | 0.828 | 93% | 93% | - | 27% | no | 0.87 | - |
-| "cheap restaurants" | intent | Downtown Miami | 2.92 / 1.80 | 0.876 | 0.756 | 93% | 73% | cheap:100% | 53% | no | 1.00 | - |
-| "open now" | intent | Downtown Miami | 3.53 / 1.54 | 0.928 | 0.663 | 100% | - | open_now:100% | 53% | no | 1.00 | - |
+| "steakhouse" | category | Downtown Miami | 2.99 / 1.35 | 0.920 | 0.834 | 87% | 100% | - | 20% | no | 0.93 | - |
+| "cheap restaurants" | intent | Downtown Miami | 2.63 / 1.80 | 0.876 | 0.763 | 93% | 73% | cheap:100% | 40% | no | 1.00 | - |
+| "open now" | intent | Downtown Miami | 4.90 / 1.96 | 0.925 | 0.717 | 100% | - | open_now:100% | 33% | no | 0.87 | - |
 | "fancy dinner" | intent | Downtown Miami | (no results, lexical baseline) | | | | | | | | | |
 | "date night" | intent | Downtown Miami | 8.97 / 9.74 | 0.842 | 0.512 | 80% | 100% | date_night:n/a | 0% | no | 1.00 | - |
 | "i'm hungry" | intent | Downtown Miami | (no results, lexical baseline) | | | | | | | | | |
-| "outdoor seating" | intent | Downtown Miami | 5.48 / 3.78 | 0.903 | 0.718 | 100% | 53% | outdoor:n/a | 53% | no | 1.00 | - |
+| "outdoor seating" | intent | Downtown Miami | 4.01 / 3.78 | 0.911 | 0.742 | 100% | 47% | outdoor:n/a | 40% | no | 1.00 | - |
 | "chill place to work" | vibe | Downtown Miami | 22.27 / 22.27 | 0.900 | 0.643 | 100% | 0% | work:n/a | 0% | no | 1.00 | - |
 | "somewhere to get pampered" | vibe | Downtown Miami | (no results, lexical baseline) | | | | | | | | | |
-| "coffee" | geo | Brickell | 1.29 / 0.71 | 0.905 | 0.634 | 100% | 93% | - | 47% | no | 1.00 | - |
-| "coffee" | geo | Miami Beach | 4.88 / 5.93 | 0.892 | 0.651 | 93% | 80% | - | 73% | no | 0.93 | - |
-| "coffee" | geo | Hialeah | 10.57 / 11.43 | 0.919 | 0.666 | 93% | 87% | - | 60% | no | 0.87 | - |
-| "sushi" | geo | Brickell | 1.53 / 0.88 | 0.907 | 0.661 | 93% | 87% | - | 53% | no | 0.93 | - |
-| "sushi" | geo | Miami Beach | 3.81 / 2.90 | 0.921 | 0.625 | 93% | 100% | - | 53% | no | 0.93 | - |
-| "sushi" | geo | Hialeah | 7.80 / 8.48 | 0.912 | 0.759 | 93% | 100% | - | 40% | no | 0.80 | - |
+| "coffee" | geo | Brickell | 1.14 / 0.69 | 0.907 | 0.593 | 100% | 93% | - | 33% | no | 0.93 | - |
+| "coffee" | geo | Miami Beach | 4.96 / 3.00 | 0.883 | 0.635 | 93% | 93% | - | 40% | no | 0.80 | - |
+| "coffee" | geo | Hialeah | 9.43 / 9.56 | 0.917 | 0.676 | 93% | 93% | - | 40% | no | 0.87 | - |
+| "sushi" | geo | Brickell | 1.72 / 0.88 | 0.911 | 0.688 | 93% | 87% | - | 47% | no | 0.93 | - |
+| "sushi" | geo | Miami Beach | 3.80 / 2.90 | 0.921 | 0.684 | 93% | 100% | - | 27% | no | 0.87 | - |
+| "sushi" | geo | Hialeah | 8.28 / 9.05 | 0.933 | 0.789 | 100% | 100% | - | 27% | no | 0.80 | - |
 
 ## Metric definitions
 
