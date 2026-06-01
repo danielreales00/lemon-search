@@ -161,7 +161,7 @@ signal_claimed(c) = 1.0 if c.is_claimed else 0.0
 Pure step. The "big boost" lives entirely in the archetype weight, ordered by
 how much trust matters per demand-shape: `high_stakes_one_time` (0.12) >
 `recurring_service` (0.10) > `medium_stakes_occasion` (0.03) >
-`low_stakes_fast_nearby` (0.01). Weights are kept small on purpose — claimed is
+`low_stakes_fast_nearby` (0.01). Weights are kept small on purpose - claimed is
 a tiebreaker, not a dominator. Because the synthesized flag is independent of
 every other signal (a hash of the id, ~20.7% base rate), a large weight pulls
 unrelated claimed businesses to the top of every result set; the

@@ -466,14 +466,14 @@ quietly deviating.
     whose claimed weights were still large (medium 0.15, high-stakes 0.25,
     recurring 0.22). Because the synthesized flag is **independent of every other
     signal** (a hash of the `id`), a large claimed weight pulls unrelated claimed
-    businesses to the top of every result set — the harness floor with claimed
+    businesses to the top of every result set - the harness floor with claimed
     weight zeroed everywhere is ~28%, so the claimed weight was the entire lever
     between 28% and 66%. We used the harness as an A/B rig and trimmed claimed
     across the board, moving the freed weight into the spec's quality signals
     (`popularity`, `rating`): low 0.05 → 0.01, medium 0.15 → 0.03, high-stakes
     0.25 → 0.12, recurring 0.22 → 0.10, experiential 0.10 → 0.07 (utility already
-    low at 0.08). The spec ordering still holds — claimed matters more for
-    high-stakes/recurring than for food — but it is now a tiebreaker, not a sort
+    low at 0.08). The spec ordering still holds - claimed matters more for
+    high-stakes/recurring than for food - but it is now a tiebreaker, not a sort
     key. Result: aggregate `claimed_pct` **66% → 38%** (literal) / **55% → 34%**
     (decay), with `category_precision` **86% → 87%** and `mean_rating`
     **0.916 → 0.919** (both slightly *up*, i.e. no quality cost). The
