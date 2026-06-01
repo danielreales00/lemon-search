@@ -1,0 +1,150 @@
+---
+title: "Search API"
+description: "The GET /search endpoint: parameters, response shape, and examples."
+---
+
+The engine exposes a single ranked-search endpoint. It takes a query and an
+optional location and time, and returns up to 15 ranked businesses with a
+per-stage timing breakdown.
+
+<Card title="Base URLs" icon="link">
+  Production API: `https://lemonapi.danielreales.lat`
+  <br />
+  Web app: `https://lemon-search-web.vercel.app`
+  <br />
+  Local dev: `http://localhost:8080`
+</Card>
+
+All responses are JSON. There is no authentication in this version. CORS is open
+to the web app's origin.
+
+## GET /search
+
+Returns up to 15 ranked businesses. An empty query returns 200 with an empty
+results array (not an error).
+
+### Query parameters
+
+| Name | Required | Type | Default | Notes |
+|---|---|---|---|---|
+| `q` | yes | string | none | The user query. Trimmed; truncated at 200 chars. Empty returns 200 with `results: []`. |
+| `lat` | no | float | downtown Miami (25.7617) | User latitude. Must be in range -90 to 90. |
+| `lng` | no | float | downtown Miami (-80.1918) | User longitude. Must be in range -180 to 180. |
+| `now` | no | RFC3339 timestamp | wall-clock | Overrides "current time" so open-now status and bench runs are reproducible. |
+| `limit` | no | int | 15 | Max results, capped at 50. |
+
+### Response
+
+A success response is 200 with this shape. Every key is `snake_case`, and
+`results` is always an array, never null.
+
+```json
+{
+  "query": "joes barbr near me",
+  "results": [
+    {
+      "id":            "39a5ece2-c293-4664-98a7-90156b3d3999",
+      "name":          "Joe's Barber Shop",
+      "category":      "Beauty",
+      "subcategory":   "Barbershop",
+      "archetype":     "medium_stakes_occasion",
+      "neighborhood":  "Brickell",
+      "distance_km":   1.24,
+      "rating":        4.7,
+      "review_count":  812,
+      "price_range":   "$$",
+      "photo_url":     "https://classpass-res.cloudinary.com/.../foo.jpg",
+      "is_claimed":    true,
+      "friend_count":  2,
+      "is_new":        false,
+      "is_open_now":   true,
+      "score":         0.8643
+    }
+  ],
+  "timings": {
+    "intent_ms":  0,
+    "embed_ms":   0,
+    "sql_ms":    18,
+    "rerank_ms":  3,
+    "total_ms":  27
+  }
+}
+```
+
+### Result fields
+
+| Field | Type | Notes |
+|---|---|---|
+| `id` | string (uuid) | Stable business identifier. |
+| `name` | string | Business name. |
+| `category` | string | Spec taxonomy category. |
+| `subcategory` | string or null | Spec sub-taxonomy. |
+| `archetype` | string | One of the six archetype values. |
+| `neighborhood` | string or null | Free text. |
+| `distance_km` | float | From the user location, capped at 48.28 km. |
+| `rating` | float or null | Google rating, 0 to 5. |
+| `review_count` | int | Review count, used as the popularity signal. |
+| `price_range` | string or null | One of `$`, `$$`, `$$$`, `$$$$`. |
+| `photo_url` | string or null | First photo, used as the thumbnail. |
+| `is_claimed` | bool | Whether the profile is claimed. |
+| `friend_count` | int | Friends who reacted positively (demo data). |
+| `is_new` | bool | Fewer than 10 reviews; gets a "new" badge and a rating demote. |
+| `is_open_now` | bool or null | Null when hours are unknown. |
+| `score` | float | The final ranking score. A pinned exact-name match surfaces as 1.0. |
+
+### Timings
+
+| Field | Meaning |
+|---|---|
+| `intent_ms` | Time spent extracting intent from the query. |
+| `embed_ms` | Query-embed time for the semantic channel; 0 when the semantic flag is off. |
+| `sql_ms` | The single retrieval round-trip. |
+| `rerank_ms` | The Go re-ranking pass. |
+| `total_ms` | End-to-end server time, at least the sum of the stages. |
+
+### Errors
+
+| Code | Body | When |
+|---|---|---|
+| 400 | `{"error": "invalid_param", "field": "lat"}` | A parameter fails validation. |
+| 408 | `{"error": "timeout"}` | The 5-second request budget is exceeded. |
+| 503 | `{"error": "database_unavailable"}` | Postgres is unreachable. |
+| 500 | `{"error": "internal"}` | Unexpected; logged with a trace id. |
+
+Stack traces are never returned. The internal trace id is logged server-side.
+
+### Examples
+
+<CodeGroup>
+```bash Plain query
+curl 'https://lemonapi.danielreales.lat/search?q=sushi'
+```
+
+```bash With location and fixed time
+curl 'https://lemonapi.danielreales.lat/search?q=cheap+restaurants&lat=25.7741&lng=-80.1937&now=2026-05-27T13:00:00-04:00'
+```
+
+```bash Vibe query
+curl 'https://lemonapi.danielreales.lat/search?q=chill+place+to+work'
+```
+
+```bash Empty query returns empty results, not an error
+curl 'https://lemonapi.danielreales.lat/search?q='
+# {"query":"","results":[],"timings":{...}}
+```
+</CodeGroup>
+
+## Health and version endpoints
+
+| Endpoint | Returns |
+|---|---|
+| `GET /healthz` | `{"status": "ok"}` whenever the process is responsive. Does not check the database. |
+| `GET /readyz` | 200 when a `SELECT 1` succeeds within 100ms, else 503. Used as the readiness gate. |
+| `GET /version` | Build version, commit SHA, build time, and Go version. |
+
+## Stability
+
+The `/search` response shape is locked for this version. Adding fields is
+non-breaking; renaming or removing a field is breaking and would be reissued from
+a `/v2/search` path. The server request timeout is 5 seconds, and each Postgres
+query has a 1-second statement timeout set at pool init.

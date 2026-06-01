@@ -1,0 +1,72 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "theme": "mint",
+  "name": "Lemon Search",
+  "colors": {
+    "primary": "#E9C400",
+    "light": "#F4D738",
+    "dark": "#C7A800"
+  },
+  "favicon": "/favicon.svg",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Guide",
+        "groups": [
+          {
+            "group": "Get started",
+            "pages": [
+              "overview",
+              "how-it-works"
+            ]
+          },
+          {
+            "group": "The engine",
+            "pages": [
+              "architecture",
+              "ranking",
+              "intent-and-semantic"
+            ]
+          },
+          {
+            "group": "Build on it",
+            "pages": [
+              "extending",
+              "future",
+              "operations"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API reference",
+        "groups": [
+          {
+            "group": "Reference",
+            "pages": [
+              "api-reference/search"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "navbar": {
+    "links": [
+      {
+        "label": "Web app",
+        "href": "https://lemon-search-web.vercel.app"
+      }
+    ],
+    "primary": {
+      "type": "button",
+      "label": "GitHub",
+      "href": "https://github.com/danielreales00/lemon-search"
+    }
+  },
+  "footer": {
+    "socials": {
+      "github": "https://github.com/danielreales00/lemon-search"
+    }
+  }
+}

@@ -1,0 +1,226 @@
+---
+title: "Ranking explained"
+description: "The seven signals and six archetypes, in plain English and in the math."
+---
+
+Ranking is where Lemon Search decides the order of results. Every candidate is
+scored on seven signals, each normalized to a value between 0 and 1, multiplied
+by a weight that depends on the kind of business, and summed into a final score.
+This page explains it twice: once in plain English for the intuition, and once in
+the formulas for the implementation.
+
+<Note>
+**Spec-contract discipline.** The default behavior follows the written spec
+literally, even where a "smarter" alternative exists. Alternatives (a smoothed
+rating, a distance decay curve) ship as config switches that default off. We do
+not silently substitute a cleverer formula for the one we were asked to build.
+See [ADR-0004](https://github.com/danielreales00/lemon-search/blob/main/docs/adr/0004-spec-contract-discipline.md)
+and the [distance options](#the-distance-option-literal-vs-decay) below.
+</Note>
+
+## The seven signals
+
+<Tabs>
+  <Tab title="In plain English">
+    Each result earns points on seven things. How much each one matters depends
+    on the type of business (see archetypes below).
+
+    1. **Distance.** Closer is better, up to a 30-mile cap. Beyond that it counts
+       for nothing.
+    2. **Rating.** Higher-rated businesses score higher. New businesses get a
+       slight rating demote so a brand-new spot does not leapfrog a proven one on
+       a thin score.
+    3. **Popularity.** More reviews means more confidence, but on a gentle curve.
+       A place with 800 reviews should not bury one with 50; it just gets a
+       modest edge.
+    4. **Friends.** If your friends reacted positively, the business gets a boost.
+       More friends, bigger boost.
+    5. **Claimed.** A business that has claimed its profile gets a meaningful
+       boost; an unclaimed one gets none.
+    6. **Photos.** Three or more photos is full credit. Fewer than three is a
+       significant demotion, because a sparse listing looks worse and is usually
+       less trustworthy.
+    7. **Open now.** Open beats opens-later beats closed, computed from the
+       business's posted hours against the current time. For some business types,
+       being closed removes it from the results entirely.
+  </Tab>
+  <Tab title="The math">
+    The final score is a weighted linear sum, where the weights come from the
+    business's archetype:
+
+    ```text
+    score(c) = sum over signals of  weight_i[archetype(c)] * signal_i(c)
+    ```
+
+    Each `signal_i(c)` is in the range 0 to 1. The seven signal formulas (default
+    "literal" mode):
+
+    ```text
+    distance     = max(1 - distance_km / 48.28, 0)         # 48.28 km is 30 miles
+    rating       = (lemon_score / 10) * (0.85 if is_new else 1.0)
+    popularity   = log(1 + review_count) / log(1 + 10000)
+    friends      = min(friend_count / 5, 1.0)
+    claimed      = 1.0 if is_claimed else 0.0
+    photos       = 1.0 if photo_count >= 3 else 0.25
+    open_status  = 1.0 if open_now,  0.3 if opens-later,  0.0 if closed,  0.7 if hours unknown
+    ```
+
+    Notes that matter:
+
+    - The score is **not** normalized; its theoretical maximum is the sum of the
+      archetype's weights. Tie-breaking and de-pin distances work in absolute
+      score space.
+    - Distance is computed by Postgres at retrieval time with
+      `earth_distance(loc, user_loc)`. A business with no coordinates gets
+      distance infinity, so its distance signal is forced to 0.
+    - The 0.85 new-business factor lives in
+      `config.new_business.rating_demote_factor`. The popularity denominator is a
+      fixed `GLOBAL_MAX_REVIEWS` (10000) so behavior is stable across data
+      updates.
+    - Hours-unknown rows get 0.7 (soft-open) and are **never** hard-filtered: a
+      conservative call so we do not hide the 19% of businesses with missing
+      hours.
+  </Tab>
+</Tabs>
+
+## The six archetypes
+
+The same signal matters differently for different businesses. Distance is
+everything for a tow truck and nearly irrelevant for a wedding photographer you
+would happily drive across town for. So every category maps to one of six
+archetypes, and each archetype has its own set of weights.
+
+<Tabs>
+  <Tab title="In plain English">
+    | Archetype | Examples | What it leans on |
+    |---|---|---|
+    | Low-stakes, fast and nearby | restaurants, cafés, bars, fast food | distance, rating, open-now is a hard filter |
+    | Medium-stakes, occasion | gyms, salons, barbers, spas, tattoo | rating, popularity, friends; distance moderate |
+    | High-stakes, one-time | weddings, contractors, photographers, movers | rating, claimed, friends, photos; distance barely matters |
+    | Experiential | boats, hotels, theaters, beach clubs | photo quality, rating; open-now nearly irrelevant |
+    | Recurring service | cleaners, dog walkers, meal prep, coworking | rating, claimed, friends; distance as a service-area filter |
+    | Utility, distance-dominant | towing, tires, glass repair, convenience | distance extremely high, open-now hard filter |
+
+    Two examples make the intuition concrete. For a **café**, you want the closest
+    good one that is open right now, so distance is heavy and being closed removes
+    it. For a **wedding photographer**, you will travel and you book weeks ahead,
+    so distance and open-now barely count while rating, reviews, and a claimed,
+    photo-rich profile dominate.
+  </Tab>
+  <Tab title="The math">
+    Weights live in `config/ranking.yaml` and are the only place archetype
+    behavior is encoded. The defaults:
+
+    | Signal | low_stakes | medium_stakes | high_stakes | experiential | recurring | utility |
+    |---|---|---|---|---|---|---|
+    | distance | 0.25 | 0.10 | 0.04 | 0.08 | 0.08 | 0.45 |
+    | rating | 0.18 | 0.20 | 0.20 | 0.22 | 0.20 | 0.10 |
+    | popularity | 0.15 | 0.18 | 0.18 | 0.14 | 0.18 | 0.10 |
+    | friends | 0.12 | 0.15 | 0.16 | 0.16 | 0.16 | 0.02 |
+    | claimed | 0.05 | 0.15 | 0.25 | 0.10 | 0.22 | 0.08 |
+    | photos | 0.10 | 0.12 | 0.15 | 0.25 | 0.10 | 0.05 |
+    | open_status | 0.15 | 0.10 | 0.02 | 0.05 | 0.06 | 0.20 |
+    | **open behavior** | hard_filter | soft | ignore | ignore | soft | hard_filter |
+
+    The "big boost for claimed" the spec asks for lives entirely in the weight:
+    `claimed` is 0.25 for high-stakes and 0.22 for recurring service, but only a
+    tiebreaker (0.05) for low-stakes. The open-status behavior column controls
+    whether a closed business is dropped before scoring (`hard_filter`),
+    participates normally (`soft`), or is ignored (`ignore`).
+  </Tab>
+</Tabs>
+
+## The distance option: literal vs decay
+
+Distance is the clearest place where a "smarter" formula was tempting, so it is
+the model case for spec-contract discipline.
+
+<Tabs>
+  <Tab title="In plain English">
+    The spec says "inverse distance, capped at 30 miles", which we read as a
+    straight line: full credit up close, zero credit at 30 miles, linear in
+    between. The per-archetype emphasis (utility cares about distance far more
+    than experiential) lives in the **weight**, not the curve.
+
+    An arguably better model is a decay curve that falls off sharply for a tow
+    truck and gently for a destination spa. That is implemented and available, but
+    it is **off by default**, because the literal reading is what the spec asked
+    for. We ship the alternative behind a switch and quote a measured comparison
+    rather than quietly swapping it in.
+  </Tab>
+  <Tab title="The math">
+    ```text
+    # literal (default)
+    distance = max(1 - distance_km / 48.28, 0)
+
+    # decay (config switch: signal_formulas.distance = decay)
+    distance = exp(-distance_km / decay_km[archetype])
+    ```
+
+    Per-archetype decay constants (kilometers): utility 3, low-stakes 8,
+    medium-stakes 16, recurring 16, experiential 48, high-stakes 80.
+
+    A parallel switch exists for rating: `literal` (`lemon_score / 10`) versus
+    `bayesian` (an IMDb-style smoothing of `google_rating`, useful because
+    `lemon_score` is skewed with a mean near 9 and barely discriminates). Both
+    switches default to literal; the bench runner exercises both modes and the
+    writeup quotes the side-by-side.
+  </Tab>
+</Tabs>
+
+## The pipeline around the score
+
+The linear sum is the middle of an eight-step pipeline. The other steps handle
+the spec's harder requirements:
+
+<Steps>
+  <Step title="Hard-filter pre-pass">
+    For archetypes that hard-filter on hours (low-stakes, utility), drop any
+    candidate explicitly closed now. This runs in Go, not SQL, because one query
+    returns mixed archetypes and a single WHERE clause cannot express
+    archetype-specific filtering.
+  </Step>
+  <Step title="Compute signals and sum">
+    The seven signals and the weighted linear sum, as above.
+  </Step>
+  <Step title="Exact-name pin">
+    If the query is an exact (possibly misspelled) business name, that business is
+    pinned to position one with an effectively infinite score, honoring the spec's
+    "returns that business first, regardless of other ranking signals". This is
+    guarded carefully so a category word like "coffee" does not pin a business
+    literally named "Coffee To Go". See
+    [Smart intent and semantic search](/intent-and-semantic#the-exact-name-pin-and-its-guards).
+  </Step>
+  <Step title="Tie-break and de-pin">
+    Equal scores break deterministically (claimed first, then closer, then more
+    reviews, then stable by id). A final de-pin pass keeps brand-new businesses
+    out of the very top two unless they clearly dominate, honoring "do not surface
+    a new business at the very top".
+  </Step>
+</Steps>
+
+## Worked example
+
+Query "sushi near brickell", a sushi restaurant 1.5 km away, lemon score 9.2, 420
+reviews, 2 friends, claimed, 8 photos, open now. Archetype is low-stakes:
+
+```text
+distance:    0.25 * 0.969 = 0.2422
+rating:      0.18 * 0.920 = 0.1656
+popularity:  0.15 * 0.656 = 0.0984
+friends:     0.12 * 0.400 = 0.0480
+claimed:     0.05 * 1.000 = 0.0500
+photos:      0.10 * 1.000 = 0.1000
+open_status: 0.15 * 1.000 = 0.1500
+                            ------
+score                      = 0.8542
+```
+
+A similar sushi place 4 km away with 50 reviews and no friends scores about
+0.7588. The first wins by roughly 0.10: distance dominates within the
+neighborhood-tight low-stakes weights, but popularity and friends are the
+differentiators between two close restaurants.
+
+For the full formula reference (every edge case, the bench numbers), see
+[docs/ranking/semantics.md](https://github.com/danielreales00/lemon-search/blob/main/docs/ranking/semantics.md)
+in the repo.

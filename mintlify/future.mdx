@@ -1,0 +1,102 @@
+---
+title: "Future improvements"
+description: "Honest, concrete next steps and the known gaps they would close."
+---
+
+This page is deliberately honest about what is not yet done. These are the levers
+that would most improve the engine, roughly in priority order, each tied to a
+real gap the build surfaced.
+
+## Diversity in the top results (MMR)
+
+**Gap**: a query like "coffee" can clump several locations of the same chain near
+the top, because they all score similarly. There is no diversity pass today.
+
+**Fix**: add Maximal Marginal Relevance (MMR) as a re-ordering step after the
+linear sum and before the top-15 cut. MMR trades a little raw score for variety
+across chains, owners, or neighborhoods. It fits cleanly because it operates on
+the already-scored list and does not touch the seven-signal contract.
+
+## Click-through learning loop
+
+**Gap**: the ranker's weights are hand-tuned and static. Nothing learns from what
+users actually click.
+
+**Fix**: log `(query, result, clicked)` events (the request lifecycle is already
+instrumented with structured logs), aggregate them nightly, and nudge the
+archetype weights in `config/ranking.yaml` or add a per-user history signal in the
+recall SQL. Because weights are config and every signal is a 0-to-1 value times a
+weight, a learned signal slots into the existing sum. See
+[Extending the system](/extending#the-per-user-learning-loop).
+
+## Threading the full intent overlay into retrieval
+
+**Gap**: `intent.Extract` already produces a complete overlay (category, tags,
+price, open-now), but only the categorical guard on the exact-name pin consumes it
+today. The price and tag filters are logged, not yet applied to the recall query.
+
+**Fix**: thread the overlay's filters into `search_candidates`. The recall
+function already accepts these parameters (passed null until wired), so this is
+plumbing, not redesign. It would make "cheap rooftop cocktails" filter as
+precisely as it parses.
+
+## Better hours data
+
+**Gap**: hours are 81% populated. For the missing 19%, the open-status signal
+defaults to 0.7 (soft-open) and those businesses are never hard-filtered. That is
+an honest mitigation, but it means open-now is not a fully reliable signal.
+
+**Fix**: re-scrape hours from a richer source to push coverage toward 99%, which
+would let open-now become a trustworthy hard filter for the archetypes that want
+it, instead of a conservative default.
+
+## Stronger partial-name matching
+
+**Gap**: matching a fragment of a real name (not a typo of the whole name) is the
+standing weak spot, measured at 37% on the bench. The exact-name pin work tightened
+the pin, not recall, so it deliberately left this untouched.
+
+**Fix**: this is a recall and ranking gap. A tuned Meilisearch adapter measured
+better on partials (43% vs 37%) and is already validated behind the
+`BusinessRepo` port; adopting it for this dimension is a wiring change, not a
+rewrite. Alternatively, a partial-name recall arm in the SQL plus a ranking term
+for fragment coverage.
+
+## Per-user friends, not denormalized counts
+
+**Gap**: the friend signal is a denormalized `friend_count` column, a demo-only
+shortcut. Real multi-user Lemon needs friends resolved per current user.
+
+**Fix**: a proper relations join table and a `user_id` parameter on the recall
+function, so friend reactions are computed for the actual requester inside the same
+round-trip. The "raw signals out" contract does not change.
+
+## Co-scaling the database for higher throughput
+
+**Gap**: under sustained load the bottleneck is the database's CPU, not the API
+box. The load bench shows the throughput knee sits right where the database's
+two-core math predicts (around 80 requests per second), while the API box's embed
+pool has far more headroom (roughly 900 requests per second on the current
+instance).
+
+**Fix**: this is a sizing lever, not a code problem. Database CPU scales at the
+larger compute tiers (4, 8, 16 cores), and the load bench attributes the wall
+cleanly because it records the server's SQL and embed split per request. The
+honest framing: name the wall, scale the right tier, and confirm the knee moves
+out proportionally. See [Operations](/operations#the-speed-story).
+
+## Name cleaning for SEO-spam listings
+
+**Gap**: a small minority of records have SEO-optimized names (all-caps keyword
+runs, trailing keyword strings like "Joe's Plumbing - Plumber, Drain Cleaning").
+They are real businesses, so they are kept, but they hurt exact-name match
+quality.
+
+**Fix**: a name-cleaner that strips trailing punctuated keyword runs before
+indexing, leaving the human-readable name for matching.
+
+---
+
+The throughline: most of these are config or wiring changes, not redesigns,
+because the seams (the overlay, the repo port, the config-driven ranker) were put
+in place precisely so these levers could be pulled without restructuring the core.
